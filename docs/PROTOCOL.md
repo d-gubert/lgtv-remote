@@ -678,8 +678,41 @@ All five return `{"returnValue": true}` unconditionally — **including when not
 The reply confirms the frame was accepted, never that the media state changed. There is no way to
 read transport state back on webOS 23, so a client cannot verify a pause took effect.
 
-Note that `media.viewer` appears in `getServiceList` but exposes no method discovered here;
-`media.viewer/getStatus` is a `404`.
+#### `media.viewer` — opening a file (dead on webOS 23)
+
+`media.viewer` appears in `getServiceList` and does have real methods, but none of them can be
+made to work on this firmware.
+
+| Method | Status | Payload | Result |
+| --- | --- | --- | --- |
+| `ssap://media.viewer/open` | `broken` | `{ target: string }` | `1 Invalid appId specified OR Unsupported Application Type: com.webos.app.photovideo` |
+| `ssap://media.viewer/open` | `broken` | anything without `target` | `500 Application error` |
+| `ssap://media.viewer/close` | `403` | — | `access denied` — method exists, refuses this client |
+| `ssap://media.viewer/play`, `/stop`, `/getStatus`, `/getViewerStatus` | `404` | — | not this service's methods |
+
+`open` requires a `target` and then hands off to `com.webos.app.photovideo` — an app id that no
+longer exists on webOS 23 (`getAppInfo` for it returns the same `Invalid appId` error). The
+hand-off target is fixed: passing `appId` alongside `target` does not redirect it, and the error
+is identical for `file://` and `http://` targets and for `.mp4` / `.jpg` / `.mp3` extensions. The
+endpoint is a relic pointing at a removed app; there is no payload that makes it succeed.
+
+**There is therefore no way to open a file from USB over SSAP.** The pieces that do exist:
+
+- `com.webos.service.attachedstoragemanager/listDevices` (section 6.12) enumerates attached USB
+  storage and gives its mount path — a listing only, with no directory-browse method.
+- The Media Player app is `com.webos.app.mediadiscovery` (photovideo's replacement). Its
+  `getAppInfo` reports `deeplinkingParams: ""`, i.e. it declares no deep-link template, and it
+  behaves accordingly: `system.launcher/launch` with `contentId`, and `launch` with
+  `params: { target | deviceId }`, both answer `returnValue: true` and then land on the app's
+  device-picker home screen (verified on-screen). The launch reply's `true` is about the app id
+  only; the content arguments are silently dropped.
+
+Driving the Media Player's UI with `lgtv key` / the pointer socket is the only remaining route.
+
+Also `404`, searched for while looking for a play-a-URI API: `com.webos.media/load`,
+`com.webos.media/play`, `com.webos.service.mediaindexer/getDeviceList`,
+`com.webos.service.mediaindexer/requestMediaScan`, `com.webos.service.photorenderer/display`,
+`com.webos.service.videooutput/getStatus`.
 
 ---
 
