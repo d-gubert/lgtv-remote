@@ -13,6 +13,7 @@ import {
   typeCommand
 } from "./commands/remote.js"
 import { configCommand, discoverCommand, pairCommand } from "./commands/setup.js"
+import { youtubeCommand } from "./commands/youtube.js"
 import * as Session from "./services/Session.js"
 import { Settings } from "./services/Settings.js"
 import { bold, dim } from "./ui.js"
@@ -63,6 +64,7 @@ const quickStart = [
   "  lgtv --host <ip> pair      approve the prompt on the TV once",
   "  lgtv status                see what it is doing",
   "  lgtv volume set 12         change something",
+  "  lgtv youtube <url>         play a video on the TV",
   "",
   dim("Run `lgtv --help` for the full command list.")
 ].join("\n")
@@ -84,6 +86,7 @@ export const cli = Command.make(
     volumeCommand,
     muteCommand,
     appCommand,
+    youtubeCommand,
     inputCommand,
     channelCommand,
     mediaCommand,

@@ -120,6 +120,10 @@ export const startFakeTv = async (
             ]
           })
           return
+        case "ssap://system.launcher/launch":
+          // The real TV answers a launch with a session id alongside returnValue.
+          reply({ sessionId: "com.webos.applicationManager.sessionId.1" })
+          return
         case "ssap://com.webos.service.networkinput/getPointerInputSocket":
           reply({ socketPath: `ws://127.0.0.1:${pointerPort}/pointer` })
           return

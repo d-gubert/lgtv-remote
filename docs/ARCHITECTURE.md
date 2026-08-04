@@ -284,7 +284,8 @@ service graph is under test too, minus argv parsing. `LGTV_CONFIG_DIR` points at
 directory so the suite never touches the developer's real config. Unreachable-host behaviour is
 covered by pointing a second layer at port 1.
 
-`test/units.test.ts` covers the two pure helpers worth isolating, `parseMac` and `resolveButton`.
+`test/units.test.ts` covers the pure helpers worth isolating: `parseMac`, `resolveButton`, and
+the YouTube link parsing (`parseYoutubeTarget`, `contentTarget`, `launchPayload`).
 Not covered: SSDP and Wake-on-LAN (both need real broadcast traffic), and the command handlers.
 
 ## Why the protocol is hand-rolled
