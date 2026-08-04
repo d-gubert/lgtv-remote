@@ -272,21 +272,50 @@ layer only exists once parsing succeeded, and parse failures still have to rende
 ## Tests
 
 `npm test` runs `node:test` through `tsx`. No framework, and nothing in `src/` is mocked.
+`npm run typecheck` uses `tsconfig.test.json`, which is the root config widened to include
+`test/` — the root `tsconfig.json` builds `src/` only, so on its own it never checks the tests.
+
 `test/fake-tv.ts` is a real `ws` server on port 0 implementing enough webOS to exercise the
-client: the prompt-then-grant handshake, keyed re-connection without a prompt, a handful of
-`ssap://` endpoints, *both* refusal shapes (an `error` frame for unknown URIs, `returnValue:
-false` for `ssap://tv/openChannel`), a second server standing in for the pointer input socket,
-and `pushVolume` to emit subscription updates on a remembered id.
+client, and it is deliberately adversarial: alongside the prompt-then-grant handshake, keyed
+re-connection, a handful of `ssap://` endpoints and *both* refusal shapes, it can reject a
+pairing, return `registered` with no key, never answer at all, go silent on a chosen uri
+(`silence`), answer late so replies arrive out of order (`delayReply`), terminate connections
+mid-request (`dropConnections`), and push four flavours of junk down a subscription. It also
+counts open sockets and prompts, and records every frame verbatim in `rawFrames`.
 
-`test/protocol.test.ts` drives the real `connect`/`withTv` against it, building `Session.layer`
-from a literal `GlobalOptions` (`protocol.test.ts:17-24`) — the same layer the CLI builds, so the
-service graph is under test too, minus argv parsing. `LGTV_CONFIG_DIR` points at a `mkdtemp`
-directory so the suite never touches the developer's real config. Unreachable-host behaviour is
-covered by pointing a second layer at port 1.
+### The contract suite
 
-`test/units.test.ts` covers the pure helpers worth isolating: `parseMac`, `resolveButton`, and
-the YouTube link parsing (`parseYoutubeTarget`, `contentTarget`, `launchPayload`).
-Not covered: SSDP and Wake-on-LAN (both need real broadcast traffic), and the command handlers.
+`test/contract/` is the harness that has to survive detaching the protocol client from Effect.
+`client.ts` defines a plain Promise-shaped seam — no `effect` import anywhere in it — and
+`suite.ts` states the client's behaviour against that seam only: handshake outcomes, refusal
+shapes, request timeout, dropped sockets, out-of-order demultiplexing, decode failures,
+subscription lifetime, pointer frames, and socket teardown. `effect-client.ts` adapts today's
+implementation to the seam, handing `connect` a literal `SessionApi` — no `Settings`, no
+filesystem — because where the client key is *stored* is the CLI's concern, not the protocol's.
+
+The point is that a second adapter (`plain-client.ts`) can be added for an Effect-free SDK and
+both run green from the same cases until the Effect binding is retired. `suite.ts` and `wire.ts`
+should not need editing during that port; if they do, the rewrite changed behaviour rather than
+structure.
+
+`test/contract/wire.ts` is a golden transcript — exact frame shapes, the per-connection `lgtv-N`
+counter, and a **frozen sha256 of the serialised pairing manifest**. The behavioural tests cannot
+catch a mangled manifest (the fake TV ignores its contents, and comparing the wire against
+`pairingManifest` moves both sides together), but a real TV verifies an RSA signature over those
+exact bytes. Changing the checksum means you have a new signature and have tested it on hardware.
+
+`test/protocol.test.ts` drives the real `connect`/`withTv` through the actual `Session.layer` and
+`Settings` (`LGTV_CONFIG_DIR` points at a `mkdtemp` directory), which is what keeps the *service
+graph* under test — the contract suite deliberately bypasses it. Transport resolution lives here
+for the same reason.
+
+`test/units.test.ts` covers the pure helpers worth isolating: `parseMac`, `macForActiveInterface`,
+`resolveButton`, and the YouTube link parsing.
+
+Not covered: `wss://` (needs a TLS fake TV with a fixture certificate), the pairing-approval
+timeout (the wait is `max(timeout, 60s)`, so a real test would take a minute — the 60s floor is
+covered indirectly by pairing succeeding past a short request timeout), SSDP and Wake-on-LAN
+(both need real broadcast traffic), and the command handlers.
 
 ## Why the protocol is hand-rolled
 
