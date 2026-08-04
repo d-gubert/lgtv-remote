@@ -1,7 +1,7 @@
 import { Args, Command, Options } from "@effect/cli"
 import { Console, Effect, Option, Stream } from "effect"
 import { BadInput } from "../domain/errors.js"
-import { SoftwareInfo, Uri } from "../domain/ssap.js"
+import { SoftwareInfo, SystemInfo, Uri } from "../domain/ssap.js"
 import { Session } from "../services/Session.js"
 import { withTv } from "../services/Tv.js"
 import { cyan, dim, emit, keyValue, ok } from "../ui.js"
@@ -21,6 +21,14 @@ export const infoCommand = Command.make("info", {}, () =>
     Effect.gen(function* () {
       const software = yield* tv.requestAs(Uri.softwareInfo, SoftwareInfo)
       const version = [software.major_ver, software.minor_ver].filter(Boolean).join(".")
+      // Not every model answers this one; the rest of `info` still works without it.
+      const system = yield* Effect.option(tv.requestAs(Uri.systemInfo, SystemInfo))
+      const systemLines: ReadonlyArray<readonly [string, string]> = Option.isSome(system)
+        ? [
+            ["serial", system.value.serialNumber ?? "unknown"],
+            ["receiver", system.value.receiverType ?? "unknown"]
+          ]
+        : []
       yield* emit(
         keyValue([
           ["host", tv.host],
@@ -28,9 +36,10 @@ export const infoCommand = Command.make("info", {}, () =>
           ["model", software.model_name ?? "unknown"],
           ["product", software.product_name ?? "unknown"],
           ["firmware", version === "" ? "unknown" : version],
-          ["device id", software.device_id ?? "unknown"]
+          ["device id", software.device_id ?? "unknown"],
+          ...systemLines
         ]),
-        { host: tv.host, url: tv.url, ...software }
+        { host: tv.host, url: tv.url, ...software, ...(Option.isSome(system) ? system.value : {}) }
       )
     })
   )

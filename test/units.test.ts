@@ -3,6 +3,7 @@ import { describe, it } from "node:test"
 import { Either, Option } from "effect"
 import { allButtons, resolveButton } from "../src/domain/buttons.js"
 import { macForActiveInterface } from "../src/domain/ssap.js"
+import { tokenize } from "../src/domain/tokenize.js"
 import {
   contentTarget,
   launchPayload,
@@ -201,6 +202,49 @@ describe("launchPayload", () => {
 
   it("honours an app id override", () => {
     assert.equal(launchPayload({ videoId: "dQw4w9WgXcQ" }, "youtube.leanback.v6")["id"], "youtube.leanback.v6")
+  })
+})
+
+describe("tokenize", () => {
+  it("splits plain whitespace-separated words", () => {
+    assert.deepEqual(tokenize("volume up"), Either.right(["volume", "up"]))
+    assert.deepEqual(tokenize("key HOME UP UP ENTER"), Either.right(["key", "HOME", "UP", "UP", "ENTER"]))
+  })
+
+  it("groups a double-quoted argument, spaces and all", () => {
+    assert.deepEqual(
+      tokenize('toast "Dinner is ready"'),
+      Either.right(["toast", "Dinner is ready"])
+    )
+    assert.deepEqual(
+      tokenize('type "planet earth" --enter'),
+      Either.right(["type", "planet earth", "--enter"])
+    )
+  })
+
+  it("groups a single-quoted argument the same way", () => {
+    assert.deepEqual(tokenize("toast 'Dinner is ready'"), Either.right(["toast", "Dinner is ready"]))
+  })
+
+  it("honours a backslash escape", () => {
+    assert.deepEqual(tokenize("toast Hi\\ there"), Either.right(["toast", "Hi there"]))
+    assert.deepEqual(tokenize('toast "she said \\"hi\\""'), Either.right(["toast", 'she said "hi"']))
+  })
+
+  it("does not un-escape inside single quotes", () => {
+    assert.deepEqual(tokenize("toast 'a\\backslash'"), Either.right(["toast", "a\\backslash"]))
+  })
+
+  it("treats a blank or whitespace-only line as no tokens", () => {
+    assert.deepEqual(tokenize(""), Either.right([]))
+    assert.deepEqual(tokenize("   "), Either.right([]))
+  })
+
+  it("rejects an unterminated quote", () => {
+    for (const input of ['toast "oops', "toast 'oops", 'type "planet earth" --enter "oops']) {
+      const result = tokenize(input)
+      assert.equal(Either.isLeft(result), true, `expected ${input} to be rejected`)
+    }
   })
 })
 

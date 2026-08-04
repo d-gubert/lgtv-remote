@@ -84,6 +84,13 @@ export const VolumeStatus = Schema.Struct({
 })
 export type VolumeStatus = typeof VolumeStatus.Type
 
+/** `audio/getStatus`: everything `getVolume` returns, plus a flat `mute`. */
+export const AudioStatus = Schema.Struct({
+  ...VolumeStatus.fields,
+  mute: Schema.optional(Schema.Boolean)
+})
+export type AudioStatus = typeof AudioStatus.Type
+
 export const LaunchPoint = Schema.Struct({
   id: Schema.String,
   title: Schema.optional(Schema.String),
@@ -133,6 +140,16 @@ export const SoftwareInfo = Schema.Struct({
   device_id: Schema.optional(Schema.String)
 })
 export type SoftwareInfo = typeof SoftwareInfo.Type
+
+/** `system/getSystemInfo` — accepted, but the value never changes on a given TV. */
+export const SystemInfo = Schema.Struct({
+  modelName: Schema.optional(Schema.String),
+  serialNumber: Schema.optional(Schema.String),
+  receiverType: Schema.optional(Schema.String),
+  features: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+  programMode: Schema.optional(Schema.Boolean)
+})
+export type SystemInfo = typeof SystemInfo.Type
 
 export const PowerState = Schema.Struct({
   state: Schema.optional(Schema.String),

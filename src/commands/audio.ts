@@ -1,22 +1,33 @@
 import { Args, Command } from "@effect/cli"
 import { Effect, Option } from "effect"
 import { BadInput } from "../domain/errors.js"
-import { Uri, VolumeStatus } from "../domain/ssap.js"
+import { AudioStatus, Uri } from "../domain/ssap.js"
+import type { Tv } from "../services/Tv.js"
 import { withTv } from "../services/Tv.js"
 import { cyan, dim, emit, ok } from "../ui.js"
 
 /** webOS reports volume at the top level on some models, nested on others. */
-const flatten = (status: VolumeStatus) => ({
+const flatten = (status: AudioStatus) => ({
   volume: status.volume ?? status.volumeStatus?.volume,
-  muted: status.muted ?? status.volumeStatus?.muteStatus,
+  muted: status.muted ?? status.mute ?? status.volumeStatus?.muteStatus,
   maxVolume: status.volumeStatus?.maxVolume,
   soundOutput: status.volumeStatus?.soundOutput
 })
 
+/**
+ * `getStatus` is `getVolume` plus a flat `mute`, but not every model answers
+ * it — fall back to `getVolume` (a subset of the same schema) rather than
+ * fail a `volume`/`mute` command over a richer endpoint nobody asked for.
+ */
+const readStatus = (tv: Tv) =>
+  tv
+    .requestAs(Uri.getAudioStatus, AudioStatus)
+    .pipe(Effect.catchTag("SsapFailed", () => tv.requestAs(Uri.getVolume, AudioStatus)))
+
 const readVolume = Command.make("volume", {}, () =>
   withTv((tv) =>
     Effect.gen(function* () {
-      const status = flatten(yield* tv.requestAs(Uri.getVolume, VolumeStatus))
+      const status = flatten(yield* readStatus(tv))
       yield* emit(
         `${cyan(String(status.volume ?? "?"))}${status.muted === true ? dim(" (muted)") : ""}${
           status.soundOutput === undefined ? "" : dim(` · out: ${status.soundOutput}`)
@@ -89,7 +100,7 @@ export const muteCommand = Command.make("mute", { state: muteState }, ({ state }
       const requested = Option.getOrElse(state, () => "toggle" as const)
       const target =
         requested === "toggle"
-          ? !(flatten(yield* tv.requestAs(Uri.getVolume, VolumeStatus)).muted ?? false)
+          ? !(flatten(yield* readStatus(tv)).muted ?? false)
           : requested === "on"
       yield* tv.request(Uri.setMute, { mute: target })
       yield* ok(target ? "Muted" : "Unmuted")

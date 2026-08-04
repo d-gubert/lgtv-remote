@@ -1,4 +1,4 @@
-import { Console, Duration, Effect, Option, Queue, Schema, Scope, Stream } from "effect"
+import { Console, Context, Duration, Effect, Option, Queue, Schema, Scope, Stream } from "effect"
 import WebSocket from "ws"
 import {
   PairingFailed,
@@ -181,7 +181,32 @@ export interface Tv {
     SsapFailed | TvUnreachable | UnexpectedResponse,
     Scope.Scope
   >
+  /** `some(reason)` once the socket has gone; every request will fail. */
+  readonly closed: Effect.Effect<Option.Option<string>>
 }
+
+/**
+ * Set by `lgtv repl` to the connection it is holding open. `withTv` uses it
+ * instead of dialling, which is what lets 22 hand-written handlers share one
+ * socket and one handshake without any of them knowing the repl exists.
+ */
+export class CurrentTv extends Context.Tag("lgtv/CurrentTv")<CurrentTv, Tv>() {}
+
+/**
+ * `requestAs` expressed in terms of a `request`. Shared so that anything
+ * decorating `request` — `lgtv repl`'s reply echo, say — covers the decoded
+ * calls too, instead of silently missing every `requestAs`.
+ */
+export const decodeRequest =
+  (request: Tv["request"]): Tv["requestAs"] =>
+  (uri, schema, payload) =>
+    Effect.flatMap(request(uri, payload), (result) =>
+      Schema.decodeUnknown(schema)(result).pipe(
+        Effect.mapError(
+          (issue) => new UnexpectedResponse({ uri, detail: issue.message.split("\n")[0] ?? "" })
+        )
+      )
+    )
 
 export type ConnectError =
   | TvUnreachable
@@ -239,18 +264,9 @@ export const connect = (
         })
       )
 
-    const requestAs = <A, I>(
-      uri: string,
-      schema: Schema.Schema<A, I>,
-      payload?: Record<string, unknown>
-    ) =>
-      Effect.flatMap(request(uri, payload), (result) =>
-        Schema.decodeUnknown(schema)(result).pipe(
-          Effect.mapError(
-            (issue) => new UnexpectedResponse({ uri, detail: issue.message.split("\n")[0] ?? "" })
-          )
-        )
-      )
+    const requestAs = decodeRequest(request)
+
+    const closed = Effect.sync(() => Option.fromNullable(pump.isClosed()))
 
     const subscribe = (uri: string) =>
       Stream.unwrapScoped(
@@ -338,15 +354,20 @@ export const connect = (
       } satisfies PointerInput
     })
 
-    return { url, host, clientKey, request, requestAs, subscribe, pointer }
+    return { url, host, clientKey, request, requestAs, subscribe, pointer, closed }
   })
 
-/** Connect, run `use`, then close the socket — the shape most commands want. */
+/**
+ * Connect, run `use`, then close the socket — the shape most commands want.
+ * When `lgtv repl` has a connection open (`CurrentTv`), reuses it instead of
+ * dialling, so 22 hand-written handlers share one socket without any of them
+ * knowing the repl exists.
+ */
 export const withTv = <A, E, R>(
   use: (tv: Tv) => Effect.Effect<A, E, R>
 ): Effect.Effect<A, E | ConnectError, Session | Exclude<R, Scope.Scope>> =>
-  Effect.scoped(Effect.flatMap(connect(), use)) as Effect.Effect<
-    A,
-    E | ConnectError,
-    Session | Exclude<R, Scope.Scope>
-  >
+  Effect.flatMap(Effect.serviceOption(CurrentTv), (borrowed) =>
+    Option.isSome(borrowed)
+      ? Effect.scoped(use(borrowed.value))
+      : Effect.scoped(Effect.flatMap(connect(), use))
+  ) as Effect.Effect<A, E | ConnectError, Session | Exclude<R, Scope.Scope>>

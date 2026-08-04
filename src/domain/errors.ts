@@ -106,3 +106,29 @@ export const explain = (error: LgTvError): string => {
       return error.detail
   }
 }
+
+const tags = {
+  TvUnreachable: true,
+  PairingFailed: true,
+  NotPaired: true,
+  SsapFailed: true,
+  UnexpectedResponse: true,
+  TvNotConfigured: true,
+  SettingsUnreadable: true,
+  DiscoveryFailed: true,
+  WakeFailed: true,
+  BadInput: true
+} satisfies Record<LgTvError["_tag"], true>
+
+/** Narrows an unknown failure to one of ours — `bin.ts` and `repl.ts` both need this. */
+export const isLgTvError = <E>(error: E): error is E & LgTvError =>
+  typeof error === "object" &&
+  error !== null &&
+  "_tag" in error &&
+  Object.hasOwn(tags, String((error as { _tag: unknown })._tag))
+
+/** The one line the CLI prints for a failure, in whichever mode is active. */
+export const render = (error: LgTvError, options: { readonly json: boolean }): string =>
+  options.json
+    ? JSON.stringify({ error: error._tag, message: explain(error), detail: error })
+    : `\u001b[31m✗\u001b[0m ${explain(error)}`

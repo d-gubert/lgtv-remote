@@ -13,11 +13,14 @@ Only two things are real Effect services: `Settings`, an `Effect.Service`
 a `Context.Tag` whose hand-written layer constructor `Session.layer(options)`
 (`src/services/Session.ts:28`, `:34`) closes over the parsed global flags and needs `Settings`.
 
-`Tv`, `Discovery` and `Wol` are **not** services despite living under `src/services/` — they are
-plain modules exporting functions that return `Effect`s: `connect`/`withTv`
-(`src/services/Tv.ts:191`, `:337`), `discover` (`src/services/Discovery.ts:124`),
-`wake`/`parseMac` (`src/services/Wol.ts:47`, `:8`). A `Tv` is a per-connection value, not a
-singleton, so there is nothing to put in the context.
+`Tv`, `Discovery`, `Wol`, `Link` and `LineReader` are **not** services despite living under
+`src/services/` — they are plain modules exporting functions that return `Effect`s: `connect`/
+`withTv` (`src/services/Tv.ts:208`, `:361`), `discover` (`src/services/Discovery.ts:124`),
+`wake`/`parseMac` (`src/services/Wol.ts:47`, `:8`), `Link.make` and `LineReader.makeLineReader`
+(used only by `lgtv repl`, below). A `Tv` is a per-connection value, not a singleton, so there is
+nothing to put in the context; `Link` and `LineReader` are one-per-repl-session values for the
+same reason, and passing them as plain values is what lets tests hand `repl.ts` a stub `LineReader`
+without standing up a layer.
 
 ```mermaid
 flowchart TD
@@ -41,7 +44,7 @@ flowchart TD
   settings --> node
 ```
 
-Wiring is two `Command.provide` calls on the root command (`src/cli.ts:84-85`):
+Wiring is two `Command.provide` calls on the root command (`src/cli.ts:68-69`):
 
 ```ts
 Command.provide((options) => Session.layer(options)),
@@ -53,17 +56,21 @@ the layer is provided to the whole subcommand tree — that is how `--host` and 
 declared once and reach every leaf handler without each subcommand redeclaring them. Second, the
 order: `Session.layer` requires `Settings`, so `Settings.Default` has to come after it in the
 pipe, where it can satisfy that requirement. Swapping the two lines does not compile.
-`NodeContext.layer` is provided last, in `bin.ts:45`, because the top-level error handler runs
+`NodeContext.layer` is provided last, in `bin.ts:22`, because the top-level error handler runs
 under it too.
 
 ## Request lifecycle
 
 `lgtv volume set 20`, end to end:
 
-1. `bin.ts:32` calls `run(process.argv)` — `Command.run` (`src/cli.ts:88`). `@effect/cli` parses
+1. `bin.ts:13` calls `run(process.argv)` — `Command.run` (`src/cli.ts:72`). `@effect/cli` parses
    argv into `GlobalOptions` (`src/services/Session.ts:6`) and the two `Command.provide`s
    construct `Settings` then `Session` around the matched handler.
-2. The handler calls `withTv` (`src/services/Tv.ts:337`) — `Effect.scoped(connect() >>= use)`.
+2. The handler calls `withTv` (`src/services/Tv.ts:361`) — `Effect.scoped(connect() >>= use)`, unless
+   `lgtv repl` has already dialled and left a connection in the `CurrentTv` context (below), in
+   which case `withTv` reuses it instead. A command never dials when a connection is already in
+   scope — that invariant is what lets 22 hand-written handlers share one socket without any of
+   them knowing the repl exists.
 3. `connect` reads `session.host`, `session.wsUrl`, `session.clientKey`; each is an `Effect`, so
    this is where the config file is actually touched. `openSocket` (`:25`) opens the websocket
    inside `Effect.acquireRelease`, `startPump` (`:64`) attaches the demultiplexer, then the
@@ -77,7 +84,7 @@ under it too.
 6. Leaving `withTv`'s scope closes the socket. `bin.ts` maps any failure to an exit code.
 
 Per-request timeout is `session.timeout` (`--timeout`, default 10s) and it fails with
-`SsapFailed{detail: "no reply within Ns"}` (`src/services/Tv.ts:224`) — not `TvUnreachable`.
+`SsapFailed{detail: "no reply within Ns"}` (`src/services/Tv.ts:241`) — not `TvUnreachable`.
 `TvUnreachable` means the socket itself failed or closed.
 
 ## SSAP
@@ -103,7 +110,7 @@ frames on one socket, multiplexed by `id`.
 
 Two distinct refusal shapes, and both become `SsapFailed`: an `error` frame, and a *successful*
 response whose payload carries `returnValue: false` plus `errorText`/`errorCode`
-(`src/services/Tv.ts:138-145`). Missing the second one is the classic way to make a failed
+(`src/services/Tv.ts:146-153`). Missing the second one is the classic way to make a failed
 command look like it worked.
 
 ### Handshake
@@ -127,7 +134,7 @@ sequenceDiagram
   C->>C: session.rememberKey(host, key) if it changed
 ```
 
-The loop is `awaitKey` at `src/services/Tv.ts:275`. Any `response` frame during the handshake is
+The loop is `awaitKey` at `src/services/Tv.ts:294`. Any `response` frame during the handshake is
 read as "the prompt is showing" — it does not inspect `pairingType` — so it prints the notice
 once and recurses. `PairingFailed` covers a rejection, a closed socket, and a `registered` frame
 with no key. The pairing wait is `Duration.max(session.timeout, 60s)` (`:307`), because a human
@@ -157,7 +164,7 @@ throws inside the `ws` listener rather than being ignored.
 
 `ssap://com.webos.service.networkinput/getPointerInputSocket` returns a `socketPath`; that is a
 **second** websocket, opened with the same `openSocket` helper and bound to the same scope
-(`src/services/Tv.ts:320`). It does not speak JSON — it takes plain text frames:
+(`src/services/Tv.ts:340`). It does not speak JSON — it takes plain text frames:
 
 ```
 type:button\nname:HOME\n\n
@@ -175,12 +182,72 @@ fire-and-forget, the cursor and key commands sleep ~120ms before the scope close
 
 `socket.send(data, cb)` in `ws` invokes `cb` with `null` on success, not `undefined` — it passes
 the underlying stream callback straight through. Checking `cause === undefined` makes every send
-look like a failure. `sendText` checks both (`src/services/Tv.ts:103-114`).
+look like a failure. `sendText` checks both (`src/services/Tv.ts:111-122`).
 
 Every socket is acquired with `Effect.acquireRelease`, and both `withTv` and the pointer channel
 are `Scope`-bound, so a Ctrl-C during `lgtv watch` or a timeout mid-request still closes the
 connection. Anything new that opens a handle belongs in a scope too; there is no other cleanup
 path.
+
+## `lgtv repl`
+
+Every other command opens its own websocket, runs the handshake, sends one or two frames, and
+closes — `withTv` is `Effect.scoped(connect() >>= use)`. `lgtv repl` (`src/commands/repl.ts`)
+instead holds one connection open across a whole interactive session, by reusing the *same*
+`@effect/cli` command tree the top-level CLI uses rather than hand-rolling a second parser:
+
+- **`src/commands/index.ts`** holds the `subcommands` tuple both `cli.ts` and `repl.ts` build
+  from, so the two can never drift and so `repl` can exclude itself — typing `repl` at the prompt
+  is just an unknown argument, not recursion. `repl.ts` builds its own root command from that
+  tuple and calls `Command.run` on it a second time, once per line; the inner root carries no
+  `Command.provide`, so it dispatches into whatever `Session`/`Settings` the *outer* `cli.ts` root
+  already put in scope, inheriting `--host`/`--ssl`/`--timeout`/`--json` for the session.
+- **`CurrentTv`** (`src/services/Tv.ts`) is a `Context.Tag` holding an already-open `Tv`. `withTv`
+  checks it first and reuses the connection if present, dialling as before otherwise — see
+  *Request lifecycle* above. This is the entire seam: none of the 22 command handlers know the
+  repl exists.
+- **`src/services/Link.ts`** owns the one live connection, replacing it on demand rather than
+  holding it for the process lifetime. Death is detected twice, because neither signal alone is
+  enough: *pre-flight* via `Tv["closed"]` (an additive field exposing what the pump already
+  tracks) before reusing a connection — catching the case where the TV went to standby between
+  lines — and *post-flight* by resetting the link whenever a dispatched line fails with
+  `TvUnreachable`. Neither path retries the line itself: "the socket was already dead" and "the
+  frame reached the TV and then the socket died" are indistinguishable, so a silent resend of
+  `key POWER` would be worse than a visible error. The Magic Remote pointer socket is opened
+  lazily and memoised on the connection (not with `Effect.cached`, which stores the whole `Exit`
+  and would cache a transient refusal forever), so `key`/`cursor` share one pointer socket for the
+  session instead of reopening it every press.
+- **`src/services/LineReader.ts`** wraps `node:readline`, chosen over `@effect/platform`
+  `Terminal.readLine` and `@effect/cli` `Prompt.text` because it is the only one that gives
+  history, tab completion, a `SIGINT` event, echo, and non-TTY piped stdin from one API. Its
+  `'line'` listener is persistent — registered once, independent of whether anything is currently
+  waiting — because Node drops a line with no listener attached, which a question-per-line loop
+  would do to every line after the first in a piped chunk. Each command runs in the foreground via
+  `Fiber.await`/`Fiber.interrupt`, so Ctrl-C cancels the running command and hands control back to
+  the prompt rather than ending the session.
+- **`src/domain/tokenize.ts`** splits one line into argv-style tokens (quotes, escapes), matching
+  `parseMac`'s convention of returning failure as data.
+- **Reply echo**, off unless `VERBOSE` is set (`true`/`1`/`yes`/`on`, read once at import like
+  `NO_COLOR`, since nothing in a session can change how the process was started). When on, the
+  `Tv` handed to `CurrentTv` for one line is wrapped by `echoing`
+  (`src/commands/repl.ts`), which taps `request` and prints each payload to stderr as it arrives,
+  plus a `← no response` flag when a *successful* line produced none — a failed line has already
+  said what happened. So that the wrapper cannot miss the schema-decoded calls, `requestAs` is no
+  longer written out inside `connect` but derived from whatever `request` it is given, via the
+  exported `decodeRequest` (`src/services/Tv.ts`); wrapping `request` therefore covers both.
+  Subscriptions are marked heard but not echoed (`watch` prints every update itself), and
+  `pointer` is left undecorated, so the one-off `getPointerInputSocket` exchange stays out of the
+  echo and key/cursor lines — write-only on the input socket — get the flag.
+
+Two things worth knowing if you extend this:
+
+- Global flags are not parseable per line — `lgtv> --json status` fails, because the inner
+  `Command.run` has no `Command.provide` of its own to re-resolve `Session` from a parsed
+  `--json`. Only `lgtv --json repl` (set for the whole session) works today.
+- Subscriptions are never cancelled TV-side. `lgtv watch` run more than once in a session leaves
+  each earlier subscription pushing frames the pump then drops (no listener is registered for
+  that id) — not a leak on our side, since the mailbox unregisters normally, but the TV keeps
+  pushing until the socket closes. A real fix needs an `unsubscribe` frame.
 
 ## Discovery and wake
 
@@ -238,7 +305,7 @@ remembered alongside the key or the next command re-prompts. Both writers store 
 connect made by any other command. Because the value is written on every pairing, re-pairing
 without the flag clears it; `config set-ssl on|off` changes it without re-pairing.
 
-`--ssl` is therefore *three*-state at the CLI boundary (`src/cli.ts:31-48`): a plain
+`--ssl` is therefore *three*-state at the CLI boundary (`src/cli.ts:24-37`): a plain
 `Options.boolean` cannot distinguish "off" from "unset", so `--ssl` and `--no-ssl` are two
 booleans mapped to one `Option<boolean>`, where `none` means "ask the saved device".
 
@@ -257,17 +324,20 @@ header comment claims rendering lives in `ui.ts`; it does not, and `ui.ts` never
 `NotPaired` is declared and rendered but never constructed anywhere: `connect` always sends the
 register frame, so a missing key just means the TV shows the prompt. Wire it up or delete it.
 
-`bin.ts` catches by tag against a `knownTags` set (`src/bin.ts:7-24`) rather than by class, so
-**adding an error type means editing both files**. In `--json` mode it prints
-`{error, message, detail}`, otherwise a red `✗` line; both go to stderr, so `--json` stdout stays
-pipeable. That flag is read straight off `process.argv` (`bin.ts:28`), not from `Session` — the
-layer only exists once parsing succeeded, and parse failures still have to render.
+`bin.ts` and `repl.ts` both classify failures with `isLgTvError` and render them with `render`
+(`src/domain/errors.ts`), which checks tags against a `satisfies Record<LgTvError["_tag"], true>`
+map — so forgetting to list a new error there is a compile error, not a silent gap the way a
+hand-kept `Set` in two files would be. In `--json` mode it prints `{error, message, detail}`,
+otherwise a red `✗` line; both go to stderr, so `--json` stdout stays pipeable. In `bin.ts` that
+flag is read straight off `process.argv` (`bin.ts:9`), not from `Session` — the layer only exists
+once parsing succeeded, and parse failures still have to render. `repl.ts` reads it from `Session`
+directly, since by the time a line is dispatched the layer is already built.
 
 | Exit | When |
 | --- | --- |
 | 0 | success |
-| 1 | any known `LgTvError`, or any other failure/defect (`bin.ts:56`) |
-| 130 | the cause is interruption only, i.e. Ctrl-C (`bin.ts:52`) |
+| 1 | any known `LgTvError`, or any other failure/defect (`bin.ts:33`) |
+| 130 | the cause is interruption only, i.e. Ctrl-C (`bin.ts:29`) |
 
 ## Tests
 
@@ -310,12 +380,28 @@ graph* under test — the contract suite deliberately bypasses it. Transport res
 for the same reason.
 
 `test/units.test.ts` covers the pure helpers worth isolating: `parseMac`, `macForActiveInterface`,
-`resolveButton`, and the YouTube link parsing.
+`resolveButton`, the YouTube link parsing, and `tokenize`.
+
+`test/repl.test.ts` drives `runRepl` (`src/commands/repl.ts`) against the fake TV with a stubbed
+`LineReader` — a queue the test offers lines to directly, so nothing touches real `stdin`. It
+covers one connection/one handshake across many lines, one pointer socket across several
+`key`/`cursor` lines, both the pre-flight (idle) and post-flight (mid-command) reconnect paths,
+bad input and `exit` never opening or re-handshaking a connection, and a baseline showing plain
+`withTv` opening one connection per call for contrast. `LineReader` itself is tested separately
+against a `PassThrough`, writing several lines in one `write()` to catch the typeahead-drop
+regression a `rl.question`-based loop would have. Five end-to-end cases spawn `bin.ts` for real,
+piping a script over non-TTY stdin: one proves the process actually exits 0 (the only tier that
+exercises the `input.pause()` finalizer), and four cover the reply echo — that it stays silent
+without `VERBOSE`, that payloads then land on stderr and not on stdout, that a `key` line gets
+`← no response`, and that a failed line does not. Spawning is what keeps the two streams
+genuinely apart and lets a test set `VERBOSE` for one case only, neither of which an in-process
+test can do (the flag is read at import).
 
 Not covered: `wss://` (needs a TLS fake TV with a fixture certificate), the pairing-approval
 timeout (the wait is `max(timeout, 60s)`, so a real test would take a minute — the 60s floor is
 covered indirectly by pairing succeeding past a short request timeout), SSDP and Wake-on-LAN
-(both need real broadcast traffic), and the command handlers.
+(both need real broadcast traffic), and most command handlers in isolation — `test/repl.test.ts`
+exercises several of them end to end through dispatch, but not each one's own edge cases.
 
 ## Why the protocol is hand-rolled
 

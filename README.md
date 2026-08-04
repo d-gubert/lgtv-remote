@@ -74,6 +74,8 @@ lgtv toast "Dinner is ready"
 lgtv watch volume|app|channel|power
 lgtv raw ssap://audio/getVolume [--payload '{"…":1}']
 lgtv config show|set-host|set-mac|set-ssl|forget
+
+lgtv repl                          Drive many commands over one connection
 ```
 
 `youtube` takes whatever the share sheet gives you — `youtu.be/…`, a `watch?v=…` URL, a
@@ -95,6 +97,44 @@ itself, so `lgtv type` cannot reach it:
 lgtv youtube --search "cello suites"
 ```
 
+### `lgtv repl`
+
+Every command above also works inside `lgtv repl`, without the leading `lgtv` — and unlike the
+one-shot form, the whole session shares a single connection and handshake, so `key`/`cursor`
+reuse one Magic Remote pointer socket instead of reopening it every press:
+
+Start it with `VERBOSE=true` and every reply the TV sends is echoed as it arrives, above whatever
+the command prints — a line that went out and got nothing back is flagged instead:
+
+```
+$ VERBOSE=true lgtv --host 192.168.1.50 repl
+Connected to 192.168.1.50. Type a command, or "help".
+lgtv> status
+← ssap://com.webos.service.tvpower/power/getPowerState {"state":"Active","returnValue":true}
+← ssap://com.webos.applicationManager/getForegroundAppInfo {"returnValue":true,"appId":"netflix"}
+← ssap://audio/getVolume {"returnValue":true,"volumeStatus":{"volume":12,"muteStatus":false}}
+192.168.1.50
+power     on
+app       netflix
+volume    12
+lgtv> key HOME
+✓ Sent HOME
+← no response
+lgtv> exit
+```
+
+`key` and `cursor` write to the Magic Remote input socket, which never answers — hence the flag.
+The echo goes to stderr, so `lgtv --json repl | jq` still sees only command output on stdout.
+`VERBOSE` is read once, when the repl starts, and accepts `true`, `1`, `yes` or `on`; without it
+the prompt behaves exactly as before.
+
+Tab completion, history, and Ctrl-C (cancels the running command, not the session) all work.
+It also reads from a pipe:
+
+```bash
+printf 'status\nvolume up\nvolume\n' | lgtv --host 192.168.1.50 repl
+```
+
 ### Global flags
 
 | Flag | Meaning |
@@ -107,7 +147,7 @@ lgtv youtube --search "cello suites"
 | `--json` | Machine-readable output, including errors. Exit code 1 on failure. |
 
 Also read from the environment: `LGTV_HOST`, `LGTV_PORT`, `LGTV_SSL`, `LGTV_MAC`,
-`LGTV_CONFIG_DIR`.
+`LGTV_CONFIG_DIR`, and `VERBOSE` (echoes the TV's raw replies inside `lgtv repl`).
 
 ```bash
 lgtv --json status | jq .volume

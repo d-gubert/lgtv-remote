@@ -221,6 +221,15 @@ export const startFakeTv = async (options: FakeTvOptions = {}): Promise<FakeTv> 
           case "ssap://com.webos.service.networkinput/getPointerInputSocket":
             reply({ socketPath: `ws://127.0.0.1:${pointerPort}/pointer` })
             return
+          case "ssap://com.webos.service.update/getCurrentSWInformation":
+            reply({
+              product_name: "webOSTV FAKE",
+              model_name: "FAKE_TV_MODEL",
+              major_ver: "1",
+              minor_ver: "0",
+              device_id: "aa:bb:cc:dd:ee:ff"
+            })
+            return
           case "ssap://system/turnOff":
             reply({})
             return

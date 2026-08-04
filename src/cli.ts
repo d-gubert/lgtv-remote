@@ -1,19 +1,7 @@
 import { Command, Options } from "@effect/cli"
 import { Console, Option } from "effect"
-import { appCommand, inputCommand } from "./commands/apps.js"
-import { muteCommand, volumeCommand } from "./commands/audio.js"
-import { channelCommand } from "./commands/channels.js"
-import { infoCommand, rawCommand, toastCommand, watchCommand } from "./commands/misc.js"
-import { offCommand, onCommand, screenCommand, statusCommand } from "./commands/power.js"
-import {
-  cursorCommand,
-  keyCommand,
-  keysCommand,
-  mediaCommand,
-  typeCommand
-} from "./commands/remote.js"
-import { configCommand, discoverCommand, pairCommand } from "./commands/setup.js"
-import { youtubeCommand } from "./commands/youtube.js"
+import { subcommands, VERSION } from "./commands/index.js"
+import { replCommand } from "./commands/repl.js"
 import * as Session from "./services/Session.js"
 import { Settings } from "./services/Settings.js"
 import { bold, dim } from "./ui.js"
@@ -65,6 +53,7 @@ const quickStart = [
   "  lgtv status                see what it is doing",
   "  lgtv volume set 12         change something",
   "  lgtv youtube <url>         play a video on the TV",
+  "  lgtv repl                  drive many commands over one connection",
   "",
   dim("Run `lgtv --help` for the full command list.")
 ].join("\n")
@@ -75,35 +64,12 @@ export const cli = Command.make(
   () => Console.log(quickStart)
 ).pipe(
   Command.withDescription("Control an LG webOS TV over the network"),
-  Command.withSubcommands([
-    discoverCommand,
-    pairCommand,
-    statusCommand,
-    infoCommand,
-    onCommand,
-    offCommand,
-    screenCommand,
-    volumeCommand,
-    muteCommand,
-    appCommand,
-    youtubeCommand,
-    inputCommand,
-    channelCommand,
-    mediaCommand,
-    keyCommand,
-    keysCommand,
-    cursorCommand,
-    typeCommand,
-    toastCommand,
-    watchCommand,
-    rawCommand,
-    configCommand
-  ]),
+  Command.withSubcommands([...subcommands, replCommand]),
   Command.provide((options) => Session.layer(options)),
   Command.provide(Settings.Default)
 )
 
 export const run = Command.run(cli, {
   name: "lgtv",
-  version: "0.1.0"
+  version: VERSION
 })
