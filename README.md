@@ -28,7 +28,7 @@ lgtv status
 ```
 
 `pair` stores the client key the TV grants, plus its MAC address and whether the connection
-used `--ssl`, in `~/.config/lgtv-remote/config.json` (mode 0600). After that every command
+used `--ssl`, in `~/.config/lgtv-remote/config.yaml` (mode 0600). After that every command
 just works — no `--host` or `--ssl` needed.
 
 Without building, run it straight from source with `npm run lgtv -- status`.

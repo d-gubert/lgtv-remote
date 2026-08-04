@@ -282,7 +282,7 @@ Note `CONTROL_TV_STANBY` — LG's typo, not one to correct.
 ### 4.3 Client key lifecycle
 
 The key is a bearer credential: anyone holding it can control the TV without a prompt, from any
-address. Store it with restrictive permissions — this CLI writes `~/.config/lgtv-remote/config.json`
+address. Store it with restrictive permissions — this CLI writes `~/.config/lgtv-remote/config.yaml`
 with mode `0600`.
 
 Keys are revoked when the user resets the TV, clears paired devices, or (on some models) after a
