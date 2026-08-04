@@ -1,0 +1,44 @@
+{
+  "name": "lgtv-remote",
+  "version": "0.1.0",
+  "description": "Control an LG webOS TV from the command line, built with Effect",
+  "type": "module",
+  "bin": {
+    "lgtv": "./dist/bin.js"
+  },
+  "main": "./dist/bin.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/bin.ts",
+    "lgtv": "tsx src/bin.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepare": "npm run build",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "keywords": [
+    "lg",
+    "webos",
+    "tv",
+    "remote",
+    "cli",
+    "effect",
+    "ssap"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@effect/cli": "^0.77.0",
+    "@effect/platform": "^0.97.1",
+    "@effect/platform-node": "^0.108.1",
+    "effect": "^3.22.1",
+    "ws": "^8.21.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
