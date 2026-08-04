@@ -104,3 +104,23 @@ export const makeLineReader = (
 
     return { next, foreground }
   })
+
+/**
+ * A reader over a fixed list of lines, for `lgtv run`: the same interface the
+ * loop already drives, with no stdin behind it at all — so a scripted run
+ * works inside a pipeline whose stdin belongs to something else.
+ *
+ * `foreground` is bare `Effect.exit`: with no prompt to hand control back to,
+ * Ctrl-C should end the run rather than skip one line of it, and letting the
+ * interrupt reach the main fiber is what does that.
+ */
+export const makeScriptReader = (
+  lines: Iterable<string>
+): Effect.Effect<LineReader> =>
+  Effect.gen(function* () {
+    const queue = yield* Queue.unbounded<string>()
+    yield* Queue.offerAll(queue, lines)
+    // `poll`, not `take`: an empty queue means the script is over, which is
+    // the same end-of-input `none` that Ctrl-D gives the interactive reader.
+    return { next: Queue.poll(queue), foreground: Effect.exit }
+  })

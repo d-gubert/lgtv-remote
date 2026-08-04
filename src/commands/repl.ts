@@ -115,55 +115,75 @@ type DispatchContext = Effect.Effect.Context<DispatchEffect>
 /** Everything one dispatched line can fail with: dialling, or running. */
 type LineError = ConnectError | DispatchError
 
+export interface ReplOptions {
+  /**
+   * Stop at the first line that fails instead of carrying on to the next.
+   * `lgtv run` sets this; the prompt and piped stdin never do, since a typo
+   * at a prompt should cost you the line, not the session.
+   */
+  readonly stopOnError?: boolean
+  /** Announce the connection before the first line. Off for a scripted run. */
+  readonly banner?: boolean
+}
+
 /**
  * The loop itself, taking a `LineReader` rather than opening one over
  * `process.stdin` directly — this is what lets tests drive it with a stub
- * and never touch real stdin.
+ * and never touch real stdin, and `lgtv run` feed it a fixed script.
+ *
+ * Answers "did every line succeed?", which only a `stopOnError` caller has
+ * any use for: without it the loop runs to the end regardless and always
+ * says `true`.
  */
 export const runRepl = (
-  reader: LineReader
-): Effect.Effect<void, ConnectError, DispatchContext | Session> =>
+  reader: LineReader,
+  options: ReplOptions = {}
+): Effect.Effect<boolean, ConnectError, DispatchContext | Session> =>
   Effect.scoped(
     Effect.gen(function* () {
       const session = yield* Session
       const link = yield* Link.make
+      const stopOnError = options.stopOnError === true
+      const banner = options.banner !== false
 
-      const classify = (outcome: Exit.Exit<void, LineError>): Effect.Effect<void> =>
+      /** Reports the outcome, and says whether the line was clean. */
+      const classify = (outcome: Exit.Exit<void, LineError>): Effect.Effect<boolean> =>
         Effect.gen(function* () {
-          if (Exit.isSuccess(outcome)) return
+          if (Exit.isSuccess(outcome)) return true
           if (Cause.isInterruptedOnly(outcome.cause)) {
             yield* Console.error("^C")
-            return
+            return false
           }
           const failure = Cause.failureOption(outcome.cause)
           if (Option.isNone(failure)) {
             // A defect: something none of the handlers anticipated.
             yield* Console.error(Cause.pretty(outcome.cause))
-            return
+            return false
           }
           const error = failure.value
           // @effect/cli already printed the help doc for a parse failure.
-          if (isValidationError(error)) return
+          if (isValidationError(error)) return false
           if (isLgTvError(error)) {
             yield* Console.error(render(error, { json: session.json }))
             // "Did the frame reach the TV before the socket died?" is
             // unknowable, so the line is never retried — only dropped.
             if (error._tag === "TvUnreachable") yield* link.reset
-            return
+            return false
           }
           yield* Console.error(Cause.pretty(outcome.cause))
+          return false
         })
 
       // Fail fast, before the first prompt: pairing happens up front, and an
       // unreachable TV exits with the normal `✗ Could not reach…` instead of
       // a prompt that would fail on every line.
       const tv = yield* link.tv
-      yield* Console.error(`Connected to ${tv.host}. Type a command, or "help".`)
+      if (banner) yield* Console.error(`Connected to ${tv.host}. Type a command, or "help".`)
 
-      const step: Effect.Effect<void, never, DispatchContext | Session> = Effect.gen(
+      const step: Effect.Effect<boolean, never, DispatchContext | Session> = Effect.gen(
         function* () {
           const line = yield* reader.next
-          if (Option.isNone(line)) return
+          if (Option.isNone(line)) return true
 
           const trimmed = line.value.trim()
           if (trimmed === "") return yield* step
@@ -171,11 +191,12 @@ export const runRepl = (
             yield* Console.log(replHelp)
             return yield* step
           }
-          if (trimmed === "exit" || trimmed === "quit") return
+          if (trimmed === "exit" || trimmed === "quit") return true
 
           const tokens = tokenize(trimmed)
           if (Either.isLeft(tokens)) {
             yield* Console.error(render(tokens.left, { json: session.json }))
+            if (stopOnError) return false
             return yield* step
           }
           if (tokens.right.length === 0) return yield* step
@@ -191,17 +212,18 @@ export const runRepl = (
               )
             )
           )
-          yield* classify(outcome)
+          const ok = yield* classify(outcome)
           // Only after a line that worked: a failure has already said what
           // happened, and "no response" underneath it would just be noise.
           if (verbose && Exit.isSuccess(outcome) && !(yield* Ref.get(heard))) {
             yield* Console.error(`${dim("←")} ${yellow("no response")}`)
           }
+          if (!ok && stopOnError) return false
           return yield* step
         }
       )
 
-      yield* step
+      return yield* step
     })
   )
 

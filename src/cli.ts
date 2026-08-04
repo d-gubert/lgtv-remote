@@ -2,6 +2,7 @@ import { Command, Options } from "@effect/cli"
 import { Console, Option } from "effect"
 import { subcommands, VERSION } from "./commands/index.js"
 import { replCommand } from "./commands/repl.js"
+import { runCommand } from "./commands/run.js"
 import * as Session from "./services/Session.js"
 import { Settings } from "./services/Settings.js"
 import { bold, dim } from "./ui.js"
@@ -54,6 +55,7 @@ const quickStart = [
   "  lgtv volume set 12         change something",
   "  lgtv youtube <url>         play a video on the TV",
   "  lgtv repl                  drive many commands over one connection",
+  '  lgtv run "volume set 12"   run a sequence of them, then exit',
   "",
   dim("Run `lgtv --help` for the full command list.")
 ].join("\n")
@@ -64,7 +66,7 @@ export const cli = Command.make(
   () => Console.log(quickStart)
 ).pipe(
   Command.withDescription("Control an LG webOS TV over the network"),
-  Command.withSubcommands([...subcommands, replCommand]),
+  Command.withSubcommands([...subcommands, replCommand, runCommand]),
   Command.provide((options) => Session.layer(options)),
   Command.provide(Settings.Default)
 )

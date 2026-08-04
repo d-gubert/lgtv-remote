@@ -76,6 +76,7 @@ lgtv raw ssap://audio/getVolume [--payload '{"…":1}']
 lgtv config show|set-host|set-mac|set-ssl|forget
 
 lgtv repl                          Drive many commands over one connection
+lgtv run "volume set 12" "key HOME"   The same, from a script, stopping on the first failure
 ```
 
 `youtube` takes whatever the share sheet gives you — `youtu.be/…`, a `watch?v=…` URL, a
@@ -129,11 +130,31 @@ The echo goes to stderr, so `lgtv --json repl | jq` still sees only command outp
 the prompt behaves exactly as before.
 
 Tab completion, history, and Ctrl-C (cancels the running command, not the session) all work.
-It also reads from a pipe:
+It also reads from a pipe, running every line and exiting 0 whatever they do:
 
 ```bash
 printf 'status\nvolume up\nvolume\n' | lgtv --host 192.168.1.50 repl
 ```
+
+### `lgtv run`
+
+The same loop over a fixed sequence, for scripts. It shares the one connection and pointer socket
+the way the repl does, but reads nothing from stdin, prints no prompt, and — unlike the repl —
+**stops at the first command that fails and exits 1**, so it can stand in for a `&&` chain:
+
+```bash
+lgtv run "app launch netflix" "key HOME" "volume set 12"
+```
+
+One argument per command, or one argument holding several lines:
+
+```bash
+lgtv run $'status\nvolume up'
+```
+
+Each command is split the way a shell would split it, so quoting works as it does at the prompt
+(`lgtv run 'youtube --search "planet earth"'`). The failing command's error is reported exactly as
+the one-shot form reports it, including under `--json`; the commands after it never run.
 
 ### Global flags
 

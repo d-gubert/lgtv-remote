@@ -11,7 +11,7 @@ import { runRepl } from "../src/commands/repl.js"
 import { Uri } from "../src/domain/ssap.js"
 import { tokenize } from "../src/domain/tokenize.js"
 import type { LineReader } from "../src/services/LineReader.js"
-import { makeLineReader } from "../src/services/LineReader.js"
+import { makeLineReader, makeScriptReader } from "../src/services/LineReader.js"
 import * as Session from "../src/services/Session.js"
 import { Settings } from "../src/services/Settings.js"
 import { withTv } from "../src/services/Tv.js"
@@ -347,6 +347,181 @@ describe("end to end", () => {
 
     assert.match(stderr, /The TV refused ssap:\/\/nope\/atAll/)
     assert.doesNotMatch(stderr, /no response/)
+  })
+
+  it("carries on past a failed line and still exits 0 — stopping is `lgtv run`'s job", async () => {
+    const { code, stdout, stderr } = await pipeScript("raw ssap://nope/atAll\nstatus\nexit\n")
+
+    assert.equal(code, 0)
+    assert.match(stderr, /The TV refused/)
+    assert.match(stdout, /power\s+unknown/, "the line after the failure still runs")
+  })
+})
+
+describe("makeScriptReader", () => {
+  it("hands over every line once, then end of input", async () => {
+    const program = Effect.gen(function* () {
+      const reader = yield* makeScriptReader(["status", "volume up"])
+      return [yield* reader.next, yield* reader.next, yield* reader.next] as const
+    })
+
+    const [first, second, third] = await Effect.runPromise(program)
+    assert.deepEqual(first, Option.some("status"))
+    assert.deepEqual(second, Option.some("volume up"))
+    assert.deepEqual(third, Option.none(), "an exhausted script ends the loop, like Ctrl-D")
+  })
+})
+
+describe("lgtv run", () => {
+  let tv: FakeTv
+  let configDir: string
+
+  before(async () => {
+    configDir = await mkdtemp(join(tmpdir(), "lgtv-run-e2e-"))
+    tv = await startFakeTv()
+  })
+
+  after(async () => {
+    await tv.close()
+    await rm(configDir, { recursive: true, force: true })
+  })
+
+  /** Spawns `lgtv run …` with **no** stdin at all — the point of the command. */
+  const runScript = async (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv = {}) => {
+    const child = spawn(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        join(process.cwd(), "src/bin.ts"),
+        "--host",
+        tv.host,
+        "--port",
+        String(tv.port),
+        "run",
+        ...args
+      ],
+      {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, LGTV_CONFIG_DIR: configDir, ...env }
+      }
+    )
+
+    let stdout = ""
+    let stderr = ""
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString()
+    })
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString()
+    })
+
+    const code = await new Promise<number | null>((resolve) => child.on("close", resolve))
+    return { code, stdout, stderr }
+  }
+
+  it("runs the whole sequence over one connection, with nothing on stdin", async () => {
+    const before = tv.registerPayloads.length
+    const { code, stdout, stderr } = await runScript(["status", "volume set 12", "volume"])
+
+    assert.equal(code, 0)
+    assert.equal(
+      tv.registerPayloads.length - before,
+      1,
+      "three commands, one handshake — that is the whole point of sharing the loop"
+    )
+    assert.match(stdout, /power\s+unknown/)
+    assert.match(stdout, /12/)
+    assert.doesNotMatch(stderr, /Type a command/, "a script has no prompt to greet")
+  })
+
+  it("treats one argument holding several lines the same as several arguments", async () => {
+    const { code, stdout } = await runScript(["status\nvolume"])
+
+    assert.equal(code, 0)
+    assert.match(stdout, /power\s+unknown/)
+  })
+
+  it("splits a command the way a shell would, so quoted arguments survive", async () => {
+    const { code } = await runScript(['youtube --search "planet earth"'])
+
+    assert.equal(code, 0)
+    const launch = tv.requests.findLast((r) => r.uri === Uri.launch)
+    assert.equal(
+      launch?.payload?.["contentId"],
+      "https://www.youtube.com/tv?q=planet%20earth",
+      "the quotes group the words into one argument, exactly as at a prompt"
+    )
+  })
+
+  it("stops at the first failing command and exits 1", async () => {
+    const requestsBefore = tv.requests.length
+    const { code, stderr } = await runScript(["raw ssap://nope/atAll", "volume set 3"])
+
+    assert.equal(code, 1)
+    assert.match(stderr, /The TV refused ssap:\/\/nope\/atAll/)
+    assert.equal(
+      tv.requests.slice(requestsBefore).some((r) => r.uri === Uri.setVolume),
+      false,
+      "the command after the failure must never run"
+    )
+  })
+
+  it("stops on a line that is not a command at all, rather than skipping it", async () => {
+    const requestsBefore = tv.requests.length
+    const { code } = await runScript(["bogus", "status"])
+
+    assert.equal(code, 1)
+    assert.equal(
+      tv.requests.slice(requestsBefore).some((r) => r.uri === Uri.powerState),
+      false
+    )
+  })
+
+  it("reports an unterminated quote and runs nothing after it", async () => {
+    const requestsBefore = tv.requests.length
+    const { code, stderr } = await runScript(['toast "unclosed', "status"])
+
+    assert.equal(code, 1)
+    assert.match(stderr, /Unterminated/)
+    assert.equal(
+      tv.requests.slice(requestsBefore).some((r) => r.uri === Uri.powerState),
+      false
+    )
+  })
+
+  it("asks for a command when given none", async () => {
+    const { code, stderr } = await runScript([])
+
+    assert.equal(code, 1)
+    assert.match(stderr, /Give at least one command/)
+  })
+
+  it("renders a failure as JSON under --json, like every other command", async () => {
+    const child = spawn(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        join(process.cwd(), "src/bin.ts"),
+        "--host",
+        tv.host,
+        "--port",
+        String(tv.port),
+        "--json",
+        "run",
+        "raw ssap://nope/atAll"
+      ],
+      { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, LGTV_CONFIG_DIR: configDir } }
+    )
+    let stderr = ""
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString()
+    })
+    const code = await new Promise<number | null>((resolve) => child.on("close", resolve))
+
+    assert.equal(code, 1)
+    assert.equal(JSON.parse(stderr.trim())["error"], "SsapFailed")
   })
 })
 

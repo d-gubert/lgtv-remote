@@ -19,6 +19,13 @@ const main = run(process.argv).pipe(
       })
     )
   ),
+  // `lgtv run` stopping on a failed command. The failure itself was already
+  // reported line-by-line, so this only has to be worth a non-zero exit.
+  Effect.catchTag("ScriptAborted", () =>
+    Effect.sync(() => {
+      exitCode = 1
+    })
+  ),
   Effect.provide(NodeContext.layer)
 )
 
