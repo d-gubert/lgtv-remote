@@ -564,7 +564,7 @@ Deep-linking YouTube (`youtube.leanback.v4`) — what `lgtv youtube` sends:
 ```
 
 `https://www.youtube.com/tv?…` is the leanback front end's own URL space; it reads `v`
-(video), `list` (playlist) and `t` (start offset in seconds) off it. `contentId` and `params`
+(video), `list` (playlist), `t` (start offset in seconds) and `q` (search) off it. `contentId` and `params`
 are two firmware generations of the same mechanism — the launcher substitutes `contentId` into
 `deeplinkingParams`, older builds only honour an explicit `params` — so sending the identical
 URL in both is the portable form. A launch replies `{returnValue: true, sessionId: "…"}`.
@@ -575,8 +575,37 @@ already in the foreground, and `t=` seeks rather than being ignored. Nothing on 
 which video the app settled on — `getForegroundAppInfo` only confirms the app — so a deep link
 can only be checked by looking at the screen.
 
+`q` opens the app's **search screen with the query already entered** — `lgtv youtube --search`:
+
+```json
+{
+  "id": "youtube.leanback.v4",
+  "contentId": "https://www.youtube.com/tv?q=cello%20suites",
+  "params": { "contentTarget": "https://www.youtube.com/tv?q=cello%20suites" }
+}
+```
+
+Verified on the reference TV from a cold start (`?q=jazz%20trio`) and against the app already in
+the foreground on a previous search (`?q=cello%20suites` replaced it). Spaces were sent as `%20`;
+`+` is equally legal URL syntax but has not been tried here, which is why `contentTarget()`
+rewrites it (`src/domain/youtube.ts:147`). **An empty `q` is a no-op** — `?q=` sent to the running
+app left the screen on its previous search, so there is no deep link to a *blank* search box.
+
+That matters because the alternative route to the search box is worse than it looks. Walking
+there with `key LEFT … UP … ENTER` and then filling it with `com.webos.service.ime/insertText`
+could not be made to work: after every attempt `registerRemoteKeyboard` still reported
+`{"currentWidget":{"focus":false}}`, i.e. the leanback search field is the app's own on-screen
+keyboard grid and never raises the system IME. Text *did* appear in the box during that probing,
+but a `q` deep link had been sent in the same run and deep links land on a running app, so the
+insert is not what put it there. Deep-link the query rather than trying to type it.
+
 `system.launcher/close` answered `403 access denied` for an id that does not exist — the method
-is present but refuses ids it cannot resolve to a session this client owns.
+is present but refuses ids it cannot resolve to a session this client owns. It is also refused
+for ids that plainly do exist: closing a foreground `youtube.leanback.v4` succeeded once and then
+answered `403` a few minutes later, same client, same app, also foreground and also launched by
+this client. What distinguishes the two is not known. Treat `close` as best-effort and confirm
+with `getForegroundAppInfo` instead of trusting the reply — a refused close leaves the app
+running, which then silently turns a "cold start" test into a relaunch.
 
 Well-known app ids: `netflix`, `youtube.leanback.v4`, `amazon` (Prime Video), `com.webos.app.home`,
 `com.webos.app.livetv`, `com.webos.app.browser`, `com.webos.app.discovery` (LG Content Store),

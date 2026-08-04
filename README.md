@@ -57,6 +57,7 @@ lgtv app close netflix
 
 lgtv youtube <url|video-id>        Open a video, short or playlist in the YouTube app
              [--start 90] [--app-id ...]
+lgtv youtube --search "cello suites"   Open the YouTube search screen for a query
 
 lgtv input list
 lgtv input set HDMI_1
@@ -85,6 +86,14 @@ lgtv youtube dQw4w9WgXcQ --start 90
 ```
 
 Quote the URL: `&` and `?` mean something to your shell.
+
+`--search` opens the app's search screen with the query already filled in, which is the only
+practical way to search from the command line — the search box is drawn by the YouTube app
+itself, so `lgtv type` cannot reach it:
+
+```bash
+lgtv youtube --search "cello suites"
+```
 
 ### Global flags
 

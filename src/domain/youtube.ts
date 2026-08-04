@@ -33,6 +33,8 @@ export interface YoutubeTarget {
   readonly videoId?: string
   readonly listId?: string
   readonly startSeconds?: number
+  /** A search screen rather than a video — see `searchTarget`. */
+  readonly query?: string
 }
 
 const fail = (detail: string) => Either.left(new BadInput({ detail }))
@@ -127,18 +129,33 @@ export const parseYoutubeTarget = (input: string): Either.Either<YoutubeTarget, 
 }
 
 /**
+ * Opening the search screen with the query already filled in. There is no deep
+ * link to an *empty* search box: the app drops an empty `q` and stays wherever
+ * it was, so an all-whitespace query is refused rather than sent.
+ */
+export const searchTarget = (query: string): Either.Either<YoutubeTarget, BadInput> => {
+  const text = query.trim()
+  if (text === "") return fail("Expected something to search for")
+  return Either.right({ query: text })
+}
+
+/**
  * The deep link the app expects. Its `deeplinkingParams` template is
  * `{"contentTarget": "$CONTENTID"}`, and the leanback front end reads `v`,
- * `list` and `t` off this URL.
+ * `list`, `t` and `q` off this URL.
  */
 export const contentTarget = (target: YoutubeTarget): string => {
   const params = new URLSearchParams()
+  if (target.query !== undefined) params.set("q", target.query)
   if (target.videoId !== undefined) params.set("v", target.videoId)
   if (target.listId !== undefined) params.set("list", target.listId)
   if (target.startSeconds !== undefined && target.startSeconds > 0) {
     params.set("t", String(target.startSeconds))
   }
-  return `https://www.youtube.com/tv?${params.toString()}`
+  // `q` is the only parameter that can hold a space, and the spelling verified
+  // against the app is `%20`. `URLSearchParams` writes `+`, which is equally
+  // legal but untried on a TV, so rewrite it — no id or offset can contain one.
+  return `https://www.youtube.com/tv?${params.toString().replaceAll("+", "%20")}`
 }
 
 /**
@@ -160,4 +177,6 @@ export const launchPayload = (
 
 /** What to call this target in a one-line confirmation. */
 export const describeTarget = (target: YoutubeTarget): string =>
-  target.videoId ?? `playlist ${target.listId ?? "?"}`
+  target.query !== undefined
+    ? `search for ${JSON.stringify(target.query)}`
+    : target.videoId ?? `playlist ${target.listId ?? "?"}`

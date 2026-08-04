@@ -3,7 +3,12 @@ import { describe, it } from "node:test"
 import { Either, Option } from "effect"
 import { allButtons, resolveButton } from "../src/domain/buttons.js"
 import { macForActiveInterface } from "../src/domain/ssap.js"
-import { contentTarget, launchPayload, parseYoutubeTarget } from "../src/domain/youtube.js"
+import {
+  contentTarget,
+  launchPayload,
+  parseYoutubeTarget,
+  searchTarget
+} from "../src/domain/youtube.js"
 import { parseMac } from "../src/services/Wol.js"
 
 const WIRED = "74:C1:7E:3E:A4:E3"
@@ -155,6 +160,32 @@ describe("contentTarget", () => {
       contentTarget({ videoId: "dQw4w9WgXcQ", startSeconds: 0 }),
       "https://www.youtube.com/tv?v=dQw4w9WgXcQ"
     )
+  })
+
+  it("spells spaces in a query as %20, the form the app was verified with", () => {
+    assert.equal(
+      contentTarget({ query: "cello suites" }),
+      "https://www.youtube.com/tv?q=cello%20suites"
+    )
+  })
+
+  it("escapes a query that looks like more parameters", () => {
+    assert.equal(
+      contentTarget({ query: "a&v=dQw4w9WgXcQ" }),
+      "https://www.youtube.com/tv?q=a%26v%3DdQw4w9WgXcQ"
+    )
+  })
+})
+
+describe("searchTarget", () => {
+  it("keeps the query, trimmed", () => {
+    assert.deepEqual(searchTarget("  planet earth "), Either.right({ query: "planet earth" }))
+  })
+
+  it("refuses an empty query, which the app would silently drop", () => {
+    for (const input of ["", "   ", "\t"]) {
+      assert.equal(Either.isLeft(searchTarget(input)), true, `expected ${JSON.stringify(input)} to be rejected`)
+    }
   })
 })
 
