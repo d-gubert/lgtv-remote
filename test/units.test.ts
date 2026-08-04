@@ -3,6 +3,7 @@ import { describe, it } from "node:test"
 import { Either, Option } from "effect"
 import { allButtons, resolveButton } from "../src/domain/buttons.js"
 import { macForActiveInterface } from "../src/domain/ssap.js"
+import { contentTarget, launchPayload, parseYoutubeTarget } from "../src/domain/youtube.js"
 import { parseMac } from "../src/services/Wol.js"
 
 const WIRED = "74:C1:7E:3E:A4:E3"
@@ -63,6 +64,112 @@ describe("macForActiveInterface", () => {
 
   it("is none when the TV lists no MACs at all", () => {
     assert.deepEqual(macForActiveInterface({}, { wifi: { state: "connected" } }), Option.none())
+  })
+})
+
+describe("parseYoutubeTarget", () => {
+  const VIDEO = "dQw4w9WgXcQ"
+  const LIST = "PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI"
+
+  const target = (input: string) => {
+    const parsed = parseYoutubeTarget(input)
+    assert.equal(Either.isRight(parsed), true, `expected ${input} to parse`)
+    return Either.getOrThrow(parsed)
+  }
+
+  it("finds the video id in every link shape people share", () => {
+    for (
+      const input of [
+        VIDEO,
+        `https://www.youtube.com/watch?v=${VIDEO}`,
+        `https://m.youtube.com/watch?v=${VIDEO}&feature=share`,
+        `https://music.youtube.com/watch?v=${VIDEO}`,
+        `https://youtu.be/${VIDEO}`,
+        `youtu.be/${VIDEO}`,
+        `www.youtube.com/watch?v=${VIDEO}`,
+        `https://www.youtube.com/shorts/${VIDEO}`,
+        `https://www.youtube.com/embed/${VIDEO}`,
+        `https://www.youtube.com/live/${VIDEO}`,
+        `https://www.youtube-nocookie.com/embed/${VIDEO}`,
+        `  https://www.youtube.com/watch?v=${VIDEO}  `
+      ]
+    ) {
+      assert.deepEqual(target(input), { videoId: VIDEO }, input)
+    }
+  })
+
+  it("keeps a playlist, with or without a video alongside it", () => {
+    assert.deepEqual(target(`https://www.youtube.com/playlist?list=${LIST}`), { listId: LIST })
+    assert.deepEqual(target(LIST), { listId: LIST })
+    assert.deepEqual(target(`https://www.youtube.com/watch?v=${VIDEO}&list=${LIST}&index=2`), {
+      videoId: VIDEO,
+      listId: LIST
+    })
+  })
+
+  it("reads the start time in the forms YouTube writes it", () => {
+    const seconds = (input: string) => target(input).startSeconds
+    assert.equal(seconds(`https://youtu.be/${VIDEO}?t=90`), 90)
+    assert.equal(seconds(`https://www.youtube.com/watch?v=${VIDEO}&t=90s`), 90)
+    assert.equal(seconds(`https://www.youtube.com/watch?v=${VIDEO}&t=1h2m3s`), 3723)
+    assert.equal(seconds(`https://www.youtube.com/embed/${VIDEO}?start=45`), 45)
+    assert.equal(seconds(`https://www.youtube.com/watch?v=${VIDEO}#t=30`), 30)
+  })
+
+  it("ignores a timestamp it cannot read rather than refusing the video", () => {
+    assert.deepEqual(target(`https://www.youtube.com/watch?v=${VIDEO}&t=soon`), { videoId: VIDEO })
+  })
+
+  it("rejects anything that is not a YouTube target", () => {
+    for (
+      const input of [
+        "",
+        "   ",
+        "not a video",
+        "https://vimeo.com/12345",
+        "https://www.youtube.com/",
+        "https://www.youtube.com/watch?v=tooshort",
+        `https://www.youtube.com/playlist?list=nonsense`,
+        "https://www.youtube.com/results?search_query=cats"
+      ]
+    ) {
+      assert.equal(Either.isLeft(parseYoutubeTarget(input)), true, `expected ${input} to be rejected`)
+    }
+  })
+})
+
+describe("contentTarget", () => {
+  it("builds the deep link the leanback app reads", () => {
+    assert.equal(
+      contentTarget({ videoId: "dQw4w9WgXcQ" }),
+      "https://www.youtube.com/tv?v=dQw4w9WgXcQ"
+    )
+    assert.equal(
+      contentTarget({ videoId: "dQw4w9WgXcQ", listId: "PLabcdefghij", startSeconds: 42 }),
+      "https://www.youtube.com/tv?v=dQw4w9WgXcQ&list=PLabcdefghij&t=42"
+    )
+  })
+
+  it("leaves out a zero start time", () => {
+    assert.equal(
+      contentTarget({ videoId: "dQw4w9WgXcQ", startSeconds: 0 }),
+      "https://www.youtube.com/tv?v=dQw4w9WgXcQ"
+    )
+  })
+})
+
+describe("launchPayload", () => {
+  it("sends the deep link both ways the firmware might read it", () => {
+    const link = "https://www.youtube.com/tv?v=dQw4w9WgXcQ"
+    assert.deepEqual(launchPayload({ videoId: "dQw4w9WgXcQ" }), {
+      id: "youtube.leanback.v4",
+      contentId: link,
+      params: { contentTarget: link }
+    })
+  })
+
+  it("honours an app id override", () => {
+    assert.equal(launchPayload({ videoId: "dQw4w9WgXcQ" }, "youtube.leanback.v6")["id"], "youtube.leanback.v6")
   })
 })
 

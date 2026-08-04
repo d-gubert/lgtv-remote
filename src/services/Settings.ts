@@ -1,5 +1,6 @@
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Option, Schema } from "effect"
+import * as YAML from "yaml"
 import { SettingsUnreadable } from "../domain/errors.js"
 
 export const Device = Schema.Struct({
@@ -39,7 +40,7 @@ export class Settings extends Effect.Service<Settings>()("lgtv/Settings", {
         process.env["XDG_CONFIG_HOME"] ?? path.join(process.env["HOME"] ?? ".", ".config"),
         "lgtv-remote"
       )
-    const file = path.join(base, "config.json")
+    const file = path.join(base, "config.yaml")
 
     const read: Effect.Effect<SettingsFile, SettingsUnreadable> = Effect.gen(function* () {
       const exists = yield* fs
@@ -54,8 +55,8 @@ export class Settings extends Effect.Service<Settings>()("lgtv/Settings", {
           )
         )
       const parsed = yield* Effect.try({
-        try: () => JSON.parse(text) as unknown,
-        catch: () => new SettingsUnreadable({ path: file, detail: "not valid JSON" })
+        try: () => YAML.parse(text) as unknown,
+        catch: () => new SettingsUnreadable({ path: file, detail: "not valid YAML" })
       })
       // Unknown or future keys shouldn't brick the CLI — fall back to empty.
       return yield* decode(parsed).pipe(Effect.orElseSucceed(() => empty))
@@ -64,7 +65,7 @@ export class Settings extends Effect.Service<Settings>()("lgtv/Settings", {
     const write = (next: SettingsFile): Effect.Effect<SettingsFile, SettingsUnreadable> =>
       Effect.gen(function* () {
         yield* fs.makeDirectory(base, { recursive: true })
-        yield* fs.writeFileString(file, `${JSON.stringify(next, null, 2)}\n`)
+        yield* fs.writeFileString(file, YAML.stringify(next))
         // The client key is a credential — keep it owner-readable only.
         yield* fs.chmod(file, 0o600).pipe(Effect.ignore)
         return next

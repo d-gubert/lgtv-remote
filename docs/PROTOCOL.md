@@ -282,7 +282,7 @@ Note `CONTROL_TV_STANBY` — LG's typo, not one to correct.
 ### 4.3 Client key lifecycle
 
 The key is a bearer credential: anyone holding it can control the TV without a prompt, from any
-address. Store it with restrictive permissions — this CLI writes `~/.config/lgtv-remote/config.json`
+address. Store it with restrictive permissions — this CLI writes `~/.config/lgtv-remote/config.yaml`
 with mode `0600`.
 
 Keys are revoked when the user resets the TV, clears paired devices, or (on some models) after a
@@ -552,6 +552,28 @@ Launching:
   deep-linking, since it accepts `contentId`.
 - `contentId` semantics are per-app. `getAppInfo(id).appInfo.deeplinkingParams` shows the
   template the app expects, e.g. `{"contentTarget": "$CONTENTID"}`.
+
+Deep-linking YouTube (`youtube.leanback.v4`) — what `lgtv youtube` sends:
+
+```json
+{
+  "id": "youtube.leanback.v4",
+  "contentId": "https://www.youtube.com/tv?v=dQw4w9WgXcQ&t=90",
+  "params": { "contentTarget": "https://www.youtube.com/tv?v=dQw4w9WgXcQ&t=90" }
+}
+```
+
+`https://www.youtube.com/tv?…` is the leanback front end's own URL space; it reads `v`
+(video), `list` (playlist) and `t` (start offset in seconds) off it. `contentId` and `params`
+are two firmware generations of the same mechanism — the launcher substitutes `contentId` into
+`deeplinkingParams`, older builds only honour an explicit `params` — so sending the identical
+URL in both is the portable form. A launch replies `{returnValue: true, sessionId: "…"}`.
+
+Verified on the reference TV against YouTube `25.1.1`, whose `deeplinkingParams` is
+`{"contentTarget":"$CONTENTID"}`: the video opens from another input *and* while the app is
+already in the foreground, and `t=` seeks rather than being ignored. Nothing on the wire reports
+which video the app settled on — `getForegroundAppInfo` only confirms the app — so a deep link
+can only be checked by looking at the screen.
 
 `system.launcher/close` answered `403 access denied` for an id that does not exist — the method
 is present but refuses ids it cannot resolve to a session this client owns.

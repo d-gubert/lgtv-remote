@@ -6,6 +6,7 @@ import { after, before, describe, it } from "node:test"
 import { NodeContext } from "@effect/platform-node"
 import { Chunk, Effect, Layer, Option, Stream } from "effect"
 import { LaunchPoints, Uri, VolumeStatus } from "../src/domain/ssap.js"
+import { launchPayload } from "../src/domain/youtube.js"
 import * as Session from "../src/services/Session.js"
 import { Settings } from "../src/services/Settings.js"
 import { connect, withTv } from "../src/services/Tv.js"
@@ -71,6 +72,21 @@ describe("requests", () => {
     const { launchPoints } = await run(withTv((t) => t.requestAs(Uri.listApps, LaunchPoints)))
     assert.equal(launchPoints.length, 2)
     assert.equal(launchPoints[0]?.id, "netflix")
+  })
+
+  it("deep-links YouTube through the launcher", async () => {
+    const deepLink = "https://www.youtube.com/tv?v=dQw4w9WgXcQ&t=90"
+    const result = await run(
+      withTv((t) => t.request(Uri.launch, launchPayload({ videoId: "dQw4w9WgXcQ", startSeconds: 90 })))
+    )
+    assert.equal(typeof result["sessionId"], "string", "a launch reply carries a session id")
+
+    const sent = tv.requests.filter((r) => r.uri === Uri.launch).at(-1)
+    assert.deepEqual(sent?.payload, {
+      id: "youtube.leanback.v4",
+      contentId: deepLink,
+      params: { contentTarget: deepLink }
+    })
   })
 
   it("surfaces an error frame as SsapFailed", async () => {

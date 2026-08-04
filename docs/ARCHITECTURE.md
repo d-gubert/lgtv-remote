@@ -9,7 +9,7 @@ protocol has its own reference in [`PROTOCOL.md`](./PROTOCOL.md); none of that i
 ## Layers and dependencies
 
 Only two things are real Effect services: `Settings`, an `Effect.Service`
-(`src/services/Settings.ts:28`) needing `FileSystem` + `Path` from `NodeContext`; and `Session`,
+(`src/services/Settings.ts:32`) needing `FileSystem` + `Path` from `NodeContext`; and `Session`,
 a `Context.Tag` whose hand-written layer constructor `Session.layer(options)`
 (`src/services/Session.ts:28`, `:34`) closes over the parsed global flags and needs `Settings`.
 
@@ -210,13 +210,15 @@ then fails with nothing to see. `pair` also warns when the TV is on Wi-Fi with
 
 ## Configuration
 
-`~/.config/lgtv-remote/config.json`, honouring `$XDG_CONFIG_HOME` and overridable wholesale with
-`$LGTV_CONFIG_DIR` (`src/services/Settings.ts:33-39` — the tests rely on that override). Written
-with mode `0600` (`:66`) because the client key is a credential. The shape is
-`{ defaultHost?, devices?: { [host]: { name?, mac?, clientKey?, ssl? } } }` (`:5-12`) — multi-TV by
-design. `rememberDevice` (`:81`) sets `defaultHost` to the first host it stores, so the single-TV
+`~/.config/lgtv-remote/config.yaml`, honouring `$XDG_CONFIG_HOME` and overridable wholesale with
+`$LGTV_CONFIG_DIR` (`src/services/Settings.ts:37-43` — the tests rely on that override). Written
+with mode `0600` (`:70`) because the client key is a credential. The shape is
+`{ defaultHost?, devices?: { [host]: { name?, mac?, clientKey?, ssl? } } }` (`:6-13`) — multi-TV by
+design. `rememberDevice` (`:82`) sets `defaultHost` to the first host it stores, so the single-TV
 case never needs `config set-host`. Reads are deliberately forgiving — a corrupt or hand-edited
-file decodes to `{}` rather than failing (`:58`); only writes report `SettingsUnreadable`.
+file decodes to `{}` rather than failing (`:62`); only writes report `SettingsUnreadable`.
+The file was JSON until the format changed; there is no fallback to the old path, so a
+`config.json` left in place is ignored.
 
 Host resolution (`src/services/Session.ts:40-49`), in order: `--host` → `$LGTV_HOST` →
 `defaultHost` → the single saved device if there is exactly one → `TvNotConfigured`.
@@ -282,7 +284,8 @@ service graph is under test too, minus argv parsing. `LGTV_CONFIG_DIR` points at
 directory so the suite never touches the developer's real config. Unreachable-host behaviour is
 covered by pointing a second layer at port 1.
 
-`test/units.test.ts` covers the two pure helpers worth isolating, `parseMac` and `resolveButton`.
+`test/units.test.ts` covers the pure helpers worth isolating: `parseMac`, `resolveButton`, and
+the YouTube link parsing (`parseYoutubeTarget`, `contentTarget`, `launchPayload`).
 Not covered: SSDP and Wake-on-LAN (both need real broadcast traffic), and the command handlers.
 
 ## Why the protocol is hand-rolled

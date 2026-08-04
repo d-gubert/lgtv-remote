@@ -28,7 +28,7 @@ lgtv status
 ```
 
 `pair` stores the client key the TV grants, plus its MAC address and whether the connection
-used `--ssl`, in `~/.config/lgtv-remote/config.json` (mode 0600). After that every command
+used `--ssl`, in `~/.config/lgtv-remote/config.yaml` (mode 0600). After that every command
 just works — no `--host` or `--ssl` needed.
 
 Without building, run it straight from source with `npm run lgtv -- status`.
@@ -55,6 +55,9 @@ lgtv app current
 lgtv app launch netflix [--content-id ...]
 lgtv app close netflix
 
+lgtv youtube <url|video-id>        Open a video, short or playlist in the YouTube app
+             [--start 90] [--app-id ...]
+
 lgtv input list
 lgtv input set HDMI_1
 
@@ -71,6 +74,17 @@ lgtv watch volume|app|channel|power
 lgtv raw ssap://audio/getVolume [--payload '{"…":1}']
 lgtv config show|set-host|set-mac|set-ssl|forget
 ```
+
+`youtube` takes whatever the share sheet gives you — `youtu.be/…`, a `watch?v=…` URL, a
+short, a `/live` link, a playlist, or a bare video id — and deep-links it into the TV's
+YouTube app, keeping any `t=` timestamp:
+
+```bash
+lgtv youtube 'https://youtu.be/dQw4w9WgXcQ?t=90'
+lgtv youtube dQw4w9WgXcQ --start 90
+```
+
+Quote the URL: `&` and `?` mean something to your shell.
 
 ### Global flags
 
@@ -98,7 +112,7 @@ channel. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) covers how this codebase
 
 | Layer | What it does |
 | --- | --- |
-| `src/domain/` | SSAP endpoints and response schemas, button names, the pairing manifest, and every error as data. |
+| `src/domain/` | SSAP endpoints and response schemas, button names, YouTube link parsing, the pairing manifest, and every error as data. |
 | `src/services/Settings.ts` | The config file: default host, per-TV MAC, client key and transport. |
 | `src/services/Session.ts` | Resolves flags → env → saved settings into a URL, key and MAC. Resolution is lazy, so `discover` works before anything is configured. |
 | `src/services/Tv.ts` | The SSAP client: scoped websocket, handshake, request/response demultiplexing by frame id, subscriptions as `Stream`s, and the Magic Remote input socket. |
