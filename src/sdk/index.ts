@@ -21,8 +21,8 @@ export {
   type Pointer,
   type Subscription,
   type SubscriptionListener,
-  type Updates
-} from "./client.js"
+  type Updates,
+} from "./client.js";
 
 export {
   isSsapError,
@@ -32,11 +32,11 @@ export {
   TvUnreachable,
   UnexpectedResponse,
   type AnySsapError,
-  type SsapErrorTag
-} from "./errors.js"
+  type SsapErrorTag,
+} from "./errors.js";
 
-export { pairingManifest } from "./pairing.js"
-export { Uri } from "./uri.js"
+export { pairingManifest } from "./pairing.js";
+export { Uri } from "./uri.js";
 
 export {
   array,
@@ -50,7 +50,7 @@ export {
   unknown,
   type DecodeResult,
   type Decoder,
-  type Infer
-} from "./decode.js"
+  type Infer,
+} from "./decode.js";
 
-export * from "./responses.js"
+export * from "./responses.js";

@@ -51,5 +51,5 @@ export const Uri = {
   // Both are lowercase on the wire; `getStatus` 404s with "no such service or
   // method". The MACs and the link state live on different endpoints.
   connectionInfo: "ssap://com.webos.service.connectionmanager/getinfo",
-  connectionStatus: "ssap://com.webos.service.connectionmanager/getstatus"
-} as const
+  connectionStatus: "ssap://com.webos.service.connectionmanager/getstatus",
+} as const;

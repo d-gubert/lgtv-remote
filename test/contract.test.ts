@@ -1,7 +1,7 @@
-import { effectClient } from "./contract/effect-client.js"
-import { plainClient } from "./contract/plain-client.js"
-import { runContractTests } from "./contract/suite.js"
-import { runWireTests } from "./contract/wire.js"
+import { effectClient } from "./contract/effect-client.js";
+import { plainClient } from "./contract/plain-client.js";
+import { runContractTests } from "./contract/suite.js";
+import { runWireTests } from "./contract/wire.js";
 
 /**
  * Both implementations of the protocol client, held to one description of it:
@@ -15,8 +15,8 @@ import { runWireTests } from "./contract/wire.js"
  * rather than structure.
  */
 
-runContractTests(plainClient)
-runWireTests(plainClient)
+runContractTests(plainClient);
+runWireTests(plainClient);
 
-runContractTests(effectClient)
-runWireTests(effectClient)
+runContractTests(effectClient);
+runWireTests(effectClient);

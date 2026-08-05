@@ -423,8 +423,9 @@ directly, since by the time a line is dispatched the layer is already built.
 ## Tests
 
 `npm test` runs `node:test` through `tsx`. No framework, and nothing in `src/` is mocked.
-`npm run typecheck` uses `tsconfig.test.json`, which is the root config widened to include
+`npm run typecheck` uses `test/tsconfig.json`, which is the root config widened to include
 `test/` — the root `tsconfig.json` builds `src/` only, so on its own it never checks the tests.
+That same config is what ESLint's type-aware rules resolve the tests against.
 
 `test/fake-tv.ts` is a real `ws` server on port 0 implementing enough webOS to exercise the
 client, and it is deliberately adversarial: alongside the prompt-then-grant handshake, keyed

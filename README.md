@@ -250,6 +250,10 @@ suite drives the real client against it, so the protocol code is covered without
 `test/contract.test.ts` runs one description of the protocol against *both* the standalone
 SDK and the Effect binding, so the two cannot drift apart.
 
+`npm run typecheck` type-checks the tests too, and `npm run lint` runs ESLint over the whole
+tree (`npm run lint:fix` to auto-fix). Linting follows [`@rocket.chat/eslint-config`](https://www.npmjs.com/package/@rocket.chat/eslint-config),
+with a few Effect-specific rules relaxed in `eslint.config.js`.
+
 ## Troubleshooting
 
 **`Could not reach the TV`** — check *LG Connect Apps* is on. If the TV is a 2023 or newer

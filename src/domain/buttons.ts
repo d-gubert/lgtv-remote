@@ -9,13 +9,24 @@ export const buttonGroups = {
   volume: ["VOLUMEUP", "VOLUMEDOWN", "MUTE", "CHANNELUP", "CHANNELDOWN"],
   numbers: ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "DASH"],
   colors: ["RED", "GREEN", "YELLOW", "BLUE"],
-  menus: ["MENU", "INFO", "GUIDE", "QMENU", "ASTERISK", "CC", "LIVE_ZOOM", "AD", "SEARCH"],
-  power: ["POWER"]
-} as const
+  menus: [
+    "MENU",
+    "INFO",
+    "GUIDE",
+    "QMENU",
+    "ASTERISK",
+    "CC",
+    "LIVE_ZOOM",
+    "AD",
+    "SEARCH",
+  ],
+  power: ["POWER"],
+} as const;
 
-export const allButtons: ReadonlyArray<string> = Object.values(buttonGroups).flat()
+export const allButtons: ReadonlyArray<string> =
+  Object.values(buttonGroups).flat();
 
-const lookup = new Map(allButtons.map((b) => [b.toLowerCase(), b]))
+const lookup = new Map(allButtons.map((b) => [b.toLowerCase(), b]));
 
 /**
  * Accepts the canonical name plus the aliases people actually type
@@ -39,10 +50,10 @@ const aliases: Record<string, string> = {
   settings: "MENU",
   dot: "DASH",
   star: "ASTERISK",
-  subtitle: "CC"
-}
+  subtitle: "CC",
+};
 
 export const resolveButton = (input: string): string | undefined => {
-  const key = input.trim().toLowerCase()
-  return lookup.get(key) ?? aliases[key]
-}
+  const key = input.trim().toLowerCase();
+  return lookup.get(key) ?? aliases[key];
+};

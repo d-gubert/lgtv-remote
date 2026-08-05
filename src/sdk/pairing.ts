@@ -17,10 +17,10 @@ export const pairingManifest = {
       localizedAppNames: {
         "": "LG Remote App",
         "ko-KR": "리모컨 앱",
-        "zxx-XX": "ЛГ Rэмotэ AПП"
+        "zxx-XX": "ЛГ Rэмotэ AПП",
       },
       localizedVendorNames: {
-        "": "LG Electronics"
+        "": "LG Electronics",
       },
       permissions: [
         "TEST_SECURE",
@@ -38,9 +38,9 @@ export const pairingManifest = {
         "READ_UPDATE_INFO",
         "UPDATE_FROM_REMOTE_APP",
         "READ_LGE_TV_INPUT_EVENTS",
-        "READ_TV_CURRENT_TIME"
+        "READ_TV_CURRENT_TIME",
       ],
-      serial: "2f930e2d2cfe083771f68e4fe7bb07"
+      serial: "2f930e2d2cfe083771f68e4fe7bb07",
     },
     permissions: [
       "LAUNCH",
@@ -94,14 +94,14 @@ export const pairingManifest = {
       "CONTROL_CHANNEL_GROUP",
       "SCAN_TV_CHANNELS",
       "CONTROL_TV_POWER",
-      "CONTROL_WOL"
+      "CONTROL_WOL",
     ],
     signatures: [
       {
         signatureVersion: 1,
         signature:
-          "eyJhbGdvcml0aG0iOiJSU0EtU0hBMjU2Iiwia2V5SWQiOiJ0ZXN0LXNpZ25pbmctY2VydCIsInNpZ25hdHVyZVZlcnNpb24iOjF9.hrVRgjCwXVvE2OOSpDZ58hR+59aFNwYDyjQgKk3auukd7pcegmE2CzPCa0bJ0ZsRAcKkCTJrWo5iDzNhMBWRyaMOv5zWSrthlf7G128qvIlpMT0YNY+n/FaOHE73uLrS/g7swl3/qH/BGFG2Hu4RlL48eb3lLKqTt2xKHdCs6Cd4RMfJPYnzgvI4BNrFUKsjkcu+WD4OO2A27Pq1n50cMchmcaXadJhGrOqH5YmHdOCj5NSHzJYrsW0HPlpuAx/ECMeIZYDh6RMqaFM2DXzdKX9NmmyqzJ3o/0lkk/N97gfVRLW5hA29yeAwaCViZNCP8iC9aO0q9fQojoa7NQnAtw=="
-      }
-    ]
-  }
-} as const
+          "eyJhbGdvcml0aG0iOiJSU0EtU0hBMjU2Iiwia2V5SWQiOiJ0ZXN0LXNpZ25pbmctY2VydCIsInNpZ25hdHVyZVZlcnNpb24iOjF9.hrVRgjCwXVvE2OOSpDZ58hR+59aFNwYDyjQgKk3auukd7pcegmE2CzPCa0bJ0ZsRAcKkCTJrWo5iDzNhMBWRyaMOv5zWSrthlf7G128qvIlpMT0YNY+n/FaOHE73uLrS/g7swl3/qH/BGFG2Hu4RlL48eb3lLKqTt2xKHdCs6Cd4RMfJPYnzgvI4BNrFUKsjkcu+WD4OO2A27Pq1n50cMchmcaXadJhGrOqH5YmHdOCj5NSHzJYrsW0HPlpuAx/ECMeIZYDh6RMqaFM2DXzdKX9NmmyqzJ3o/0lkk/N97gfVRLW5hA29yeAwaCViZNCP8iC9aO0q9fQojoa7NQnAtw==",
+      },
+    ],
+  },
+} as const;

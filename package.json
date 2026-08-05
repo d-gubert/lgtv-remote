@@ -21,7 +21,9 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/bin.ts",
     "lgtv": "tsx src/bin.ts",
-    "typecheck": "tsc -p tsconfig.test.json",
+    "typecheck": "tsc -p test/tsconfig.json",
+    "lint": "eslint .",
+    "lint:fix": "eslint --fix .",
     "prepare": "npm run build",
     "test": "tsx --test test/*.test.ts"
   },
@@ -44,6 +46,7 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
+    "@rocket.chat/eslint-config": "^0.8.0",
     "@types/node": "^22.10.0",
     "@types/ws": "^8.18.1",
     "tsx": "^4.19.0",

@@ -1,14 +1,15 @@
-import { Console, Context, Duration, Effect, Option, Scope, Stream } from "effect"
+import type { Scope } from "effect";
+import { Console, Context, Duration, Effect, Option, Stream } from "effect";
+
+import { Session } from "./Session.js";
+import type { SettingsUnreadable, TvNotConfigured } from "../domain/errors.js";
 import {
   PairingFailed,
-  SettingsUnreadable,
   SsapFailed,
-  TvNotConfigured,
   TvUnreachable,
-  UnexpectedResponse
-} from "../domain/errors.js"
-import * as Ssap from "../sdk/index.js"
-import { Session } from "./Session.js"
+  UnexpectedResponse,
+} from "../domain/errors.js";
+import * as Ssap from "../sdk/index.js";
 
 /**
  * The Effect binding for `src/sdk` — the protocol itself lives there, and
@@ -20,24 +21,28 @@ import { Session } from "./Session.js"
  * resolved through `Session` instead of passed in by hand.
  */
 
-export type AnyPayload = Ssap.Payload
+export type AnyPayload = Ssap.Payload;
 
 /** Anything the protocol itself can raise, once it is in the error channel. */
-type ProtocolError = TvUnreachable | PairingFailed | SsapFailed | UnexpectedResponse
+type ProtocolError =
+  | TvUnreachable
+  | PairingFailed
+  | SsapFailed
+  | UnexpectedResponse;
 
 /** The SDK reports failure by rejecting; the CLI wants it in the error channel. */
 const toDomainError = (error: Ssap.AnySsapError): ProtocolError => {
   switch (error._tag) {
     case "TvUnreachable":
-      return new TvUnreachable({ url: error.url, cause: error.cause })
+      return new TvUnreachable({ url: error.url, cause: error.cause });
     case "PairingFailed":
-      return new PairingFailed({ url: error.url, detail: error.detail })
+      return new PairingFailed({ url: error.url, detail: error.detail });
     case "SsapFailed":
-      return new SsapFailed({ uri: error.uri, detail: error.detail })
+      return new SsapFailed({ uri: error.uri, detail: error.detail });
     case "UnexpectedResponse":
-      return new UnexpectedResponse({ uri: error.uri, detail: error.detail })
+      return new UnexpectedResponse({ uri: error.uri, detail: error.detail });
   }
-}
+};
 
 /**
  * Runs one SDK call. Anything that is not an `SsapError` is a bug rather than a
@@ -45,38 +50,54 @@ const toDomainError = (error: Ssap.AnySsapError): ProtocolError => {
  * mapping it would put a `TypeError` in front of the user dressed up as a TV
  * problem.
  */
-const call = <A>(work: (signal: AbortSignal) => Promise<A>): Effect.Effect<A, ProtocolError> =>
+const call = <A>(
+  work: (signal: AbortSignal) => Promise<A>,
+): Effect.Effect<A, ProtocolError> =>
   Effect.tryPromise({ try: work, catch: (error) => error }).pipe(
     Effect.catchAll((error) =>
-      Ssap.isSsapError(error) ? Effect.fail(toDomainError(error)) : Effect.die(error)
-    )
-  )
+      Ssap.isSsapError(error)
+        ? Effect.fail(toDomainError(error))
+        : Effect.die(error),
+    ),
+  );
 
 export interface PointerInput {
-  readonly button: (name: string) => Effect.Effect<void, TvUnreachable>
-  readonly click: Effect.Effect<void, TvUnreachable>
-  readonly move: (dx: number, dy: number, drag: boolean) => Effect.Effect<void, TvUnreachable>
-  readonly scroll: (dx: number, dy: number) => Effect.Effect<void, TvUnreachable>
+  readonly button: (name: string) => Effect.Effect<void, TvUnreachable>;
+  readonly click: Effect.Effect<void, TvUnreachable>;
+  readonly move: (
+    dx: number,
+    dy: number,
+    drag: boolean,
+  ) => Effect.Effect<void, TvUnreachable>;
+  readonly scroll: (
+    dx: number,
+    dy: number,
+  ) => Effect.Effect<void, TvUnreachable>;
 }
 
 export interface Tv {
-  readonly url: string
-  readonly host: string
-  readonly clientKey: string
+  readonly url: string;
+  readonly host: string;
+  readonly clientKey: string;
   readonly request: (
     uri: string,
-    payload?: Record<string, unknown>
-  ) => Effect.Effect<AnyPayload, SsapFailed | TvUnreachable>
+    payload?: Record<string, unknown>,
+  ) => Effect.Effect<AnyPayload, SsapFailed | TvUnreachable>;
   readonly requestAs: <A>(
     uri: string,
     decoder: Ssap.Decoder<A>,
-    payload?: Record<string, unknown>
-  ) => Effect.Effect<A, SsapFailed | TvUnreachable | UnexpectedResponse>
-  readonly subscribe: (uri: string) => Stream.Stream<AnyPayload, SsapFailed | TvUnreachable>
+    payload?: Record<string, unknown>,
+  ) => Effect.Effect<A, SsapFailed | TvUnreachable | UnexpectedResponse>;
+  readonly subscribe: (
+    uri: string,
+  ) => Stream.Stream<AnyPayload, SsapFailed | TvUnreachable>;
   /** The Magic-Remote input channel, opened once per connection and shared. */
-  readonly pointer: Effect.Effect<PointerInput, SsapFailed | TvUnreachable | UnexpectedResponse>
+  readonly pointer: Effect.Effect<
+    PointerInput,
+    SsapFailed | TvUnreachable | UnexpectedResponse
+  >;
   /** `some(reason)` once the socket has gone; every request will fail. */
-  readonly closed: Effect.Effect<Option.Option<string>>
+  readonly closed: Effect.Effect<Option.Option<string>>;
 }
 
 /**
@@ -95,11 +116,11 @@ export const decodeRequest =
   (request: Tv["request"]): Tv["requestAs"] =>
   (uri, decoder, payload) =>
     Effect.flatMap(request(uri, payload), (result) => {
-      const decoded = decoder.decode(result)
+      const decoded = decoder.decode(result);
       return decoded.ok
         ? Effect.succeed(decoded.value)
-        : Effect.fail(new UnexpectedResponse({ uri, detail: decoded.reason }))
-    })
+        : Effect.fail(new UnexpectedResponse({ uri, detail: decoded.reason }));
+    });
 
 export type ConnectError =
   | TvUnreachable
@@ -107,7 +128,7 @@ export type ConnectError =
   | SsapFailed
   | UnexpectedResponse
   | TvNotConfigured
-  | SettingsUnreadable
+  | SettingsUnreadable;
 
 /**
  * Connects, completes the webOS handshake, and stores the client key the TV
@@ -115,16 +136,18 @@ export type ConnectError =
  * the first time they pair.
  */
 export const connect = (
-  options: { readonly announcePairing?: boolean } = {}
+  options: { readonly announcePairing?: boolean } = {},
 ): Effect.Effect<Tv, ConnectError, Session | Scope.Scope> =>
   Effect.gen(function* () {
-    const session = yield* Session
-    const host = yield* session.host
-    const url = yield* session.wsUrl
-    const storedKey = yield* session.clientKey
+    const session = yield* Session;
+    const host = yield* session.host;
+    const url = yield* session.wsUrl;
+    const storedKey = yield* session.clientKey;
 
     const announce = () =>
-      Effect.runSync(Console.error("→ Accept the pairing request on your TV screen…"))
+      Effect.runSync(
+        Console.error("→ Accept the pairing request on your TV screen…"),
+      );
 
     // Not `Effect.acquireRelease`, which would make the whole handshake
     // uninterruptible — pairing can wait a minute for someone to walk to the
@@ -140,30 +163,35 @@ export const connect = (
             signal,
             timeoutMs: Duration.toMillis(session.timeout),
             ...(Option.isSome(storedKey) ? { clientKey: storedKey.value } : {}),
-            ...(options.announcePairing === false ? {} : { onPairingPrompt: announce })
-          })
-        )
+            ...(options.announcePairing === false
+              ? {}
+              : { onPairingPrompt: announce }),
+          }),
+        ),
       ).pipe(
         Effect.tap((open) =>
-          Effect.addFinalizer(() => Effect.promise(() => open.close()))
-        )
-      )
-    )
+          Effect.addFinalizer(() => Effect.promise(() => open.close())),
+        ),
+      ),
+    );
 
     if (connection.keyChanged) {
-      yield* session.rememberKey(host, connection.clientKey)
+      yield* session.rememberKey(host, connection.clientKey);
     }
 
     // `call` carries every protocol failure because `connect` can produce every
     // protocol failure. Sending a frame cannot: the handshake is long over, and
     // `request` decodes nothing. Saying so as a defect keeps those two out of
     // the error channel of all 22 command handlers.
-    const impossible = { PairingFailed: Effect.die, UnexpectedResponse: Effect.die }
+    const impossible = {
+      PairingFailed: Effect.die,
+      UnexpectedResponse: Effect.die,
+    };
 
     const request: Tv["request"] = (uri, payload) =>
       call((signal) => connection.request(uri, payload, { signal })).pipe(
-        Effect.catchTags(impossible)
-      )
+        Effect.catchTags(impossible),
+      );
 
     const subscribe = (uri: string) =>
       Stream.asyncPush<AnyPayload, SsapFailed | TvUnreachable>(
@@ -172,44 +200,50 @@ export const connect = (
             Effect.sync(() =>
               connection.subscribe(uri, {
                 onUpdate: (payload) => {
-                  emit.single(payload)
+                  emit.single(payload);
                 },
                 onError: (error) => {
                   // The SDK types this callback as the two a subscription can
                   // raise; `toDomainError` is written against the whole union
                   // and cannot say so on the way back out.
-                  emit.fail(toDomainError(error) as SsapFailed | TvUnreachable)
-                }
-              })
+                  emit.fail(toDomainError(error) as SsapFailed | TvUnreachable);
+                },
+              }),
             ),
-            (subscription) => Effect.sync(() => subscription.close())
+            (subscription) => Effect.sync(() => subscription.close()),
           ),
-        { bufferSize: "unbounded" }
-      )
+        { bufferSize: "unbounded" },
+      );
 
     // The pointer channel is write-only, so the only thing a write can report
     // is that the socket has gone; anything else is a bug worth a defect.
-    const write = (work: () => Promise<void>): Effect.Effect<void, TvUnreachable> =>
+    const write = (
+      work: () => Promise<void>,
+    ): Effect.Effect<void, TvUnreachable> =>
       Effect.tryPromise({ try: work, catch: (error) => error }).pipe(
         Effect.catchAll((error) =>
           error instanceof Ssap.TvUnreachable
-            ? Effect.fail(new TvUnreachable({ url: error.url, cause: error.cause }))
-            : Effect.die(error)
-        )
-      )
+            ? Effect.fail(
+                new TvUnreachable({ url: error.url, cause: error.cause }),
+              )
+            : Effect.die(error),
+        ),
+      );
 
     // No signal: the channel belongs to the connection, not to whichever
     // command happened to open it, so an interrupted `key` must not abort a
     // socket the next line is about to reuse.
     const pointer = Effect.map(
-      call(() => connection.pointer()).pipe(Effect.catchTag("PairingFailed", Effect.die)),
+      call(() => connection.pointer()).pipe(
+        Effect.catchTag("PairingFailed", Effect.die),
+      ),
       (input): PointerInput => ({
         button: (name) => write(() => input.button(name)),
         click: write(() => input.click()),
         move: (dx, dy, drag) => write(() => input.move(dx, dy, drag)),
-        scroll: (dx, dy) => write(() => input.scroll(dx, dy))
-      })
-    )
+        scroll: (dx, dy) => write(() => input.scroll(dx, dy)),
+      }),
+    );
 
     return {
       url: connection.url,
@@ -219,9 +253,9 @@ export const connect = (
       requestAs: decodeRequest(request),
       subscribe,
       pointer,
-      closed: Effect.sync(() => Option.fromNullable(connection.closed))
-    }
-  })
+      closed: Effect.sync(() => Option.fromNullable(connection.closed)),
+    };
+  });
 
 /**
  * Connect, run `use`, then close the socket — the shape most commands want.
@@ -230,10 +264,10 @@ export const connect = (
  * knowing the repl exists.
  */
 export const withTv = <A, E, R>(
-  use: (tv: Tv) => Effect.Effect<A, E, R>
+  use: (tv: Tv) => Effect.Effect<A, E, R>,
 ): Effect.Effect<A, E | ConnectError, Session | Exclude<R, Scope.Scope>> =>
   Effect.flatMap(Effect.serviceOption(CurrentTv), (borrowed) =>
     Option.isSome(borrowed)
       ? Effect.scoped(use(borrowed.value))
-      : Effect.scoped(Effect.flatMap(connect(), use))
-  ) as Effect.Effect<A, E | ConnectError, Session | Exclude<R, Scope.Scope>>
+      : Effect.scoped(Effect.flatMap(connect(), use)),
+  ) as Effect.Effect<A, E | ConnectError, Session | Exclude<R, Scope.Scope>>;

@@ -1,4 +1,4 @@
-import { Data } from "effect"
+import { Data } from "effect";
 
 /**
  * Every failure the CLI can produce, as data. `explain` at the bottom of this
@@ -7,52 +7,52 @@ import { Data } from "effect"
  */
 
 export class TvUnreachable extends Data.TaggedError("TvUnreachable")<{
-  readonly url: string
-  readonly cause: unknown
+  readonly url: string;
+  readonly cause: unknown;
 }> {}
 
 export class PairingFailed extends Data.TaggedError("PairingFailed")<{
-  readonly url: string
-  readonly detail: string
+  readonly url: string;
+  readonly detail: string;
 }> {}
 
 /** We have a host but no stored client key for it. */
 export class NotPaired extends Data.TaggedError("NotPaired")<{
-  readonly host: string
+  readonly host: string;
 }> {}
 
 /** The TV answered, but the answer was a refusal. */
 export class SsapFailed extends Data.TaggedError("SsapFailed")<{
-  readonly uri: string
-  readonly detail: string
+  readonly uri: string;
+  readonly detail: string;
 }> {}
 
 /** A response did not match the shape we expected. */
 export class UnexpectedResponse extends Data.TaggedError("UnexpectedResponse")<{
-  readonly uri: string
-  readonly detail: string
+  readonly uri: string;
+  readonly detail: string;
 }> {}
 
 /** No `--host`, no `LGTV_HOST`, and nothing saved. */
 export class TvNotConfigured extends Data.TaggedError("TvNotConfigured")<{
-  readonly missing: "host" | "mac"
+  readonly missing: "host" | "mac";
 }> {}
 
 export class SettingsUnreadable extends Data.TaggedError("SettingsUnreadable")<{
-  readonly path: string
-  readonly detail: string
+  readonly path: string;
+  readonly detail: string;
 }> {}
 
 export class DiscoveryFailed extends Data.TaggedError("DiscoveryFailed")<{
-  readonly detail: string
+  readonly detail: string;
 }> {}
 
 export class WakeFailed extends Data.TaggedError("WakeFailed")<{
-  readonly detail: string
+  readonly detail: string;
 }> {}
 
 export class BadInput extends Data.TaggedError("BadInput")<{
-  readonly detail: string
+  readonly detail: string;
 }> {}
 
 export type LgTvError =
@@ -65,10 +65,10 @@ export type LgTvError =
   | SettingsUnreadable
   | DiscoveryFailed
   | WakeFailed
-  | BadInput
+  | BadInput;
 
 const causeText = (cause: unknown): string =>
-  cause instanceof Error ? cause.message : String(cause)
+  cause instanceof Error ? cause.message : String(cause);
 
 /** A one-line explanation plus, where useful, the next thing to try. */
 export const explain = (error: LgTvError): string => {
@@ -81,31 +81,31 @@ export const explain = (error: LgTvError): string => {
     error.url.startsWith("wss://")
       ? "• If this model does not use the secure port, add `--no-ssl`."
       : "• Some 2023+ models only accept the secure port: add `--ssl`."
-  }`
+  }`;
     case "PairingFailed":
       return `Pairing with ${error.url} failed: ${error.detail}.
   • Accept the prompt on the TV screen within the timeout.
-  • Check Settings → General → External Devices → "LG Connect Apps" is on.`
+  • Check Settings → General → External Devices → "LG Connect Apps" is on.`;
     case "NotPaired":
-      return `No stored client key for ${error.host}. Run \`lgtv pair\` first.`
+      return `No stored client key for ${error.host}. Run \`lgtv pair\` first.`;
     case "SsapFailed":
-      return `The TV refused ${error.uri}: ${error.detail}`
+      return `The TV refused ${error.uri}: ${error.detail}`;
     case "UnexpectedResponse":
-      return `The TV's reply to ${error.uri} was not in the expected shape: ${error.detail}`
+      return `The TV's reply to ${error.uri} was not in the expected shape: ${error.detail}`;
     case "TvNotConfigured":
       return error.missing === "host"
         ? `No TV configured. Run \`lgtv discover\`, then \`lgtv config set-host <ip>\` (or pass --host / set LGTV_HOST).`
-        : `No MAC address known for this TV, so Wake-on-LAN cannot be sent. Run \`lgtv pair\` while the TV is on, or \`lgtv config set-mac <mac>\`.`
+        : `No MAC address known for this TV, so Wake-on-LAN cannot be sent. Run \`lgtv pair\` while the TV is on, or \`lgtv config set-mac <mac>\`.`;
     case "SettingsUnreadable":
-      return `Could not use the settings file at ${error.path}: ${error.detail}`
+      return `Could not use the settings file at ${error.path}: ${error.detail}`;
     case "DiscoveryFailed":
-      return `Discovery failed: ${error.detail}`
+      return `Discovery failed: ${error.detail}`;
     case "WakeFailed":
-      return `Wake-on-LAN failed: ${error.detail}`
+      return `Wake-on-LAN failed: ${error.detail}`;
     case "BadInput":
-      return error.detail
+      return error.detail;
   }
-}
+};
 
 const tags = {
   TvUnreachable: true,
@@ -117,18 +117,25 @@ const tags = {
   SettingsUnreadable: true,
   DiscoveryFailed: true,
   WakeFailed: true,
-  BadInput: true
-} satisfies Record<LgTvError["_tag"], true>
+  BadInput: true,
+} satisfies Record<LgTvError["_tag"], true>;
 
 /** Narrows an unknown failure to one of ours — `bin.ts` and `repl.ts` both need this. */
 export const isLgTvError = <E>(error: E): error is E & LgTvError =>
   typeof error === "object" &&
   error !== null &&
   "_tag" in error &&
-  Object.hasOwn(tags, String((error as { _tag: unknown })._tag))
+  Object.hasOwn(tags, String((error as { _tag: unknown })._tag));
 
 /** The one line the CLI prints for a failure, in whichever mode is active. */
-export const render = (error: LgTvError, options: { readonly json: boolean }): string =>
+export const render = (
+  error: LgTvError,
+  options: { readonly json: boolean },
+): string =>
   options.json
-    ? JSON.stringify({ error: error._tag, message: explain(error), detail: error })
-    : `\u001b[31m✗\u001b[0m ${explain(error)}`
+    ? JSON.stringify({
+        error: error._tag,
+        message: explain(error),
+        detail: error,
+      })
+    : `\u001b[31m✗\u001b[0m ${explain(error)}`;
