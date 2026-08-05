@@ -1,7 +1,7 @@
 import { Args, Command, Options } from "@effect/cli"
 import { Effect } from "effect"
 import { BadInput } from "../domain/errors.js"
-import { Channel, ChannelList, Uri } from "../domain/ssap.js"
+import { Channel, ChannelList, Uri } from "../sdk/index.js"
 import { withTv } from "../services/Tv.js"
 import { cyan, dim, emit, ok, table } from "../ui.js"
 

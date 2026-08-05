@@ -1,6 +1,6 @@
 import { Effect, Exit, Option, Ref, Scope } from "effect"
 import type { Session } from "./Session.js"
-import type { ConnectError, PointerInput, Tv } from "./Tv.js"
+import type { ConnectError, Tv } from "./Tv.js"
 import { connect } from "./Tv.js"
 
 export interface Link {
@@ -13,29 +13,10 @@ export interface Link {
 interface Generation {
   readonly tv: Tv
   readonly scope: Scope.CloseableScope
-  /** Lazy, memoised on success only — a transient refusal must not stick. */
-  readonly pointer: Ref.Ref<Option.Option<PointerInput>>
 }
 
 const closeGeneration = (generation: Generation) =>
   Scope.close(generation.scope, Exit.succeed(undefined))
-
-/**
- * Wraps a generation's `Tv` so `pointer` opens once per generation instead of
- * once per command — the whole point of holding the connection open.
- */
-const decorate = (generation: Generation): Tv => ({
-  ...generation.tv,
-  pointer: Effect.gen(function* () {
-    const cached = yield* Ref.get(generation.pointer)
-    if (Option.isSome(cached)) return cached.value
-    // Bound to the generation's own scope, not the caller's — otherwise the
-    // socket would close the moment the command that opened it finishes.
-    const opened = yield* Scope.extend(generation.tv.pointer, generation.scope)
-    yield* Ref.set(generation.pointer, Option.some(opened))
-    return opened
-  })
-})
 
 /**
  * Holds one live connection open across many commands, replacing it on
@@ -58,8 +39,7 @@ export const make: Effect.Effect<Link, never, Scope.Scope> = Effect.gen(function
     const tv = yield* Scope.extend(connect(), scope).pipe(
       Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause)))
     )
-    const pointer = yield* Ref.make(Option.none<PointerInput>())
-    const generation: Generation = { tv, scope, pointer }
+    const generation: Generation = { tv, scope }
     yield* Ref.set(current, Option.some(generation))
     return generation
   })
@@ -69,18 +49,18 @@ export const make: Effect.Effect<Link, never, Scope.Scope> = Effect.gen(function
   // concurrently — worth keeping in mind if that invariant ever changes.
   const tv: Effect.Effect<Tv, ConnectError, Session> = Effect.gen(function* () {
     const existing = yield* Ref.get(current)
-    if (Option.isNone(existing)) return decorate(yield* open)
+    if (Option.isNone(existing)) return (yield* open).tv
 
     // Pre-flight: the pump already knows if the TV went to standby between
     // lines, so a dead generation is discarded before we try to use it —
     // without this, the first command after standby always fails even
     // though a reconnect would have worked.
     const reason = yield* existing.value.tv.closed
-    if (Option.isNone(reason)) return decorate(existing.value)
+    if (Option.isNone(reason)) return existing.value.tv
 
     yield* closeGeneration(existing.value)
     yield* Ref.set(current, Option.none())
-    return decorate(yield* open)
+    return (yield* open).tv
   })
 
   const reset: Effect.Effect<void> = Effect.gen(function* () {

@@ -1,18 +1,22 @@
 import { effectClient } from "./contract/effect-client.js"
+import { plainClient } from "./contract/plain-client.js"
 import { runContractTests } from "./contract/suite.js"
 import { runWireTests } from "./contract/wire.js"
 
 /**
- * The suites that have to stay green through the de-Effecting of the protocol
- * client. Add the Effect-free SDK here as a second adapter and run both:
+ * Both implementations of the protocol client, held to one description of it:
+ * `src/sdk` on its own, and the Effect binding in `src/services/Tv.ts` that is
+ * now a thin layer over it.
  *
- *   runContractTests(plainClient)
- *   runWireTests(plainClient)
- *
- * Neither `suite.ts` nor `wire.ts` may change while that port is under way —
- * if one of them has to, the rewrite changed behaviour rather than structure,
- * and that is the thing worth arguing about.
+ * The two adapters differ only in how a failure and a decoded shape are spelled
+ * — everything the suites assert is behaviour neither is allowed to have on its
+ * own. Neither `suite.ts` nor `wire.ts` changed while the SDK was extracted; a
+ * case that had needed editing would have meant the port changed behaviour
+ * rather than structure.
  */
+
+runContractTests(plainClient)
+runWireTests(plainClient)
 
 runContractTests(effectClient)
 runWireTests(effectClient)

@@ -1,7 +1,7 @@
 import { Args, Command, Options } from "@effect/cli"
 import { Effect, Either, Option } from "effect"
 import { BadInput } from "../domain/errors.js"
-import { Uri } from "../domain/ssap.js"
+import { Uri } from "../sdk/index.js"
 import {
   contentTarget,
   describeTarget,

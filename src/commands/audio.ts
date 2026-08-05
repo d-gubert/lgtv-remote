@@ -1,7 +1,7 @@
 import { Args, Command } from "@effect/cli"
 import { Effect, Option } from "effect"
 import { BadInput } from "../domain/errors.js"
-import { AudioStatus, Uri } from "../domain/ssap.js"
+import { AudioStatus, Uri } from "../sdk/index.js"
 import type { Tv } from "../services/Tv.js"
 import { withTv } from "../services/Tv.js"
 import { cyan, dim, emit, ok } from "../ui.js"

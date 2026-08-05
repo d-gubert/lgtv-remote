@@ -8,6 +8,10 @@ protocol has its own reference in [`PROTOCOL.md`](./PROTOCOL.md); none of that i
 
 ## Layers and dependencies
 
+The protocol client is not part of this graph at all. `src/sdk/` is an ordinary Promise-based
+SDK with `ws` as its only dependency — see *The SSAP client* below — and `src/services/Tv.ts` is the
+Effect binding over it. Everything described here sits above that line.
+
 Only two things are real Effect services: `Settings`, an `Effect.Service`
 (`src/services/Settings.ts:32`) needing `FileSystem` + `Path` from `NodeContext`; and `Session`,
 a `Context.Tag` whose hand-written layer constructor `Session.layer(options)`
@@ -15,7 +19,7 @@ a `Context.Tag` whose hand-written layer constructor `Session.layer(options)`
 
 `Tv`, `Discovery`, `Wol`, `Link` and `LineReader` are **not** services despite living under
 `src/services/` — they are plain modules exporting functions that return `Effect`s: `connect`/
-`withTv` (`src/services/Tv.ts:208`, `:361`), `discover` (`src/services/Discovery.ts:124`),
+`withTv` (`src/services/Tv.ts:117`, `:229`), `discover` (`src/services/Discovery.ts:124`),
 `wake`/`parseMac` (`src/services/Wol.ts:47`, `:8`), `Link.make` and `LineReader.makeLineReader`
 (used only by `lgtv repl`, below). A `Tv` is a per-connection value, not a singleton, so there is
 nothing to put in the context; `Link` and `LineReader` are one-per-repl-session values for the
@@ -30,7 +34,8 @@ flowchart TD
   session["Session (Context.Tag)"]
   settings["Settings (Effect.Service)"]
   node["NodeContext.layer (FileSystem, Path, Terminal)"]
-  tv["Tv.connect — plain function, needs Session + Scope"]
+  tv["services/Tv.ts — Effect binding, needs Session + Scope"]
+  sdk["sdk/ — Promises, ws, no Effect"]
   disc["Discovery.discover / Wol.wake — no context"]
 
   bin --> cli
@@ -40,6 +45,7 @@ flowchart TD
   cmds --> tv
   cmds --> disc
   tv --> session
+  tv --> sdk
   session --> settings
   settings --> node
 ```
@@ -66,51 +72,64 @@ under it too.
 1. `bin.ts:13` calls `run(process.argv)` — `Command.run` (`src/cli.ts:72`). `@effect/cli` parses
    argv into `GlobalOptions` (`src/services/Session.ts:6`) and the two `Command.provide`s
    construct `Settings` then `Session` around the matched handler.
-2. The handler calls `withTv` (`src/services/Tv.ts:361`) — `Effect.scoped(connect() >>= use)`, unless
+2. The handler calls `withTv` (`src/services/Tv.ts:229`) — `Effect.scoped(connect() >>= use)`, unless
    `lgtv repl` has already dialled and left a connection in the `CurrentTv` context (below), in
    which case `withTv` reuses it instead. A command never dials when a connection is already in
    scope — that invariant is what lets 22 hand-written handlers share one socket without any of
    them knowing the repl exists.
-3. `connect` reads `session.host`, `session.wsUrl`, `session.clientKey`; each is an `Effect`, so
-   this is where the config file is actually touched. `openSocket` (`:25`) opens the websocket
-   inside `Effect.acquireRelease`, `startPump` (`:64`) attaches the demultiplexer, then the
-   handshake runs (below).
-4. `request` (`:209`) allocates an id, opens a scoped mailbox, sends the frame, blocks on
-   `Queue.take`. The pump routes the reply by id into that mailbox; `interpret` (`:129`) turns it
-   into a payload or an `SsapFailed`/`TvUnreachable`. `requestAs` (`:234`) then decodes it with an
-   `effect/Schema` from `src/domain/ssap.ts`, mapping decode failures to `UnexpectedResponse`.
+3. `connect` (`src/services/Tv.ts:117`) reads `session.host`, `session.wsUrl`,
+   `session.clientKey`; each is an `Effect`, so this is where the config file is actually
+   touched. It then hands those to the SDK's own `connect` (`src/sdk/client.ts:274`), which
+   opens the socket, attaches the demultiplexer and runs the handshake, and registers a
+   finalizer that closes the connection when the scope ends.
+4. `tv.request` wraps `connection.request` (`src/sdk/client.ts:338`): the SDK allocates an id,
+   registers a mailbox with the pump, sends the frame and waits. `interpret`
+   (`src/sdk/client.ts:154`) turns the reply into a payload or throws `SsapFailed`/
+   `TvUnreachable`; the binding's `call` (`src/services/Tv.ts:48`) moves that into the error
+   channel. `requestAs` runs the payload through a decoder from `src/sdk/responses.ts`, mapping
+   a mismatch to `UnexpectedResponse`.
 5. The command renders through `emit` (`src/ui.ts:20`), which prints the human string or
    `JSON.stringify(data)` depending on `session.json`.
 6. Leaving `withTv`'s scope closes the socket. `bin.ts` maps any failure to an exit code.
 
-Per-request timeout is `session.timeout` (`--timeout`, default 10s) and it fails with
-`SsapFailed{detail: "no reply within Ns"}` (`src/services/Tv.ts:241`) — not `TvUnreachable`.
-`TvUnreachable` means the socket itself failed or closed.
+Per-request timeout is `session.timeout` (`--timeout`, default 10s), enforced inside the SDK,
+and it fails with `SsapFailed{detail: "no reply within Ns"}` (`src/sdk/client.ts:303`) — not
+`TvUnreachable`. `TvUnreachable` means the socket itself failed or closed.
 
-## SSAP
+## The SSAP client
 
 The protocol itself — framing, handshake, the full method catalogue with parameters, and the
 pointer channel — is documented in [`PROTOCOL.md`](./PROTOCOL.md), verified against real
-hardware. This section covers only how `src/services/Tv.ts` implements it.
+hardware. This section covers how it is implemented, which is in two pieces:
+
+| | |
+| --- | --- |
+| `src/sdk/` | The client. Promises, `ws`, and nothing else — no `effect` import anywhere under it, enforced by `test/sdk.test.ts`. Published as `lgtv-remote/sdk`. |
+| `src/services/Tv.ts` | The Effect binding: failures as typed values, sockets on a `Scope`, subscriptions as `Stream`s, the client key read through `Session`. |
+
+The split exists because none of what the CLI needs from Effect is *protocol*. Anyone wanting
+to drive a TV from an ordinary Node program should not have to adopt a runtime to do it, and
+keeping the boundary honest also keeps the protocol code testable without a service graph
+(`test/contract/`, below). The CLI is simply the SDK's first consumer.
 
 `ws://host:3000`, or `wss://host:3001` with `--ssl` (or a device remembered as `ssl: true` —
 see *Configuration*). webOS presents a self-signed certificate, so
-the client sets `rejectUnauthorized: false` (`src/services/Tv.ts:32`). Everything is JSON text
+the client sets `rejectUnauthorized: false` (`src/sdk/client.ts:64`). Everything is JSON text
 frames on one socket, multiplexed by `id`.
 
 | Direction | Frame | Notes |
 | --- | --- | --- |
-| → TV | `{id:"register_0", type:"register", payload:{...manifest, "client-key"?}}` | id is the literal `register_0` (`Tv.ts:261`) |
+| → TV | `{id:"register_0", type:"register", payload:{...manifest, "client-key"?}}` | id is the literal `register_0` (`client.ts:510`) |
 | ← TV | `{type:"response", id, payload:{pairingType:"PROMPT"}}` | the dialog is now on screen |
 | ← TV | `{type:"registered", id, payload:{"client-key":"…"}}` | pairing granted |
-| → TV | `{id, type:"request", uri, payload?}` | id is `lgtv-N` from a per-connection counter (`Tv.ts:204`) |
+| → TV | `{id, type:"request", uri, payload?}` | id is `lgtv-N` from a per-connection counter (`client.ts:289`) |
 | ← TV | `{type:"response", id, payload}` | success **unless** `payload.returnValue === false` |
 | ← TV | `{type:"error", id, error:"…"}` | e.g. `404 no such service or method` |
 | → TV | `{id, type:"subscribe", uri}` | the TV then pushes further frames reusing that id |
 
 Two distinct refusal shapes, and both become `SsapFailed`: an `error` frame, and a *successful*
 response whose payload carries `returnValue: false` plus `errorText`/`errorCode`
-(`src/services/Tv.ts:146-153`). Missing the second one is the classic way to make a failed
+(`src/sdk/client.ts:154-166`). Missing the second one is the classic way to make a failed
 command look like it worked.
 
 ### Handshake
@@ -126,45 +145,49 @@ sequenceDiagram
     TV-->>P: registered { client-key }
   else first time
     TV-->>P: response { pairingType: "PROMPT" }
-    P-->>C: frame; connect prints "Accept the pairing request on your TV screen…"
+    P-->>C: frame; connect calls onPairingPrompt once
     Note over TV: user accepts on screen
     TV-->>P: registered { client-key }
   end
   P-->>C: client-key
-  C->>C: session.rememberKey(host, key) if it changed
+  C->>C: keyChanged = key !== the one offered
 ```
 
-The loop is `awaitKey` at `src/services/Tv.ts:294`. Any `response` frame during the handshake is
-read as "the prompt is showing" — it does not inspect `pairingType` — so it prints the notice
-once and recurses. `PairingFailed` covers a rejection, a closed socket, and a `registered` frame
-with no key. The pairing wait is `Duration.max(session.timeout, 60s)` (`:307`), because a human
-has to walk to the TV and a 10s command timeout must not apply. `connect({ announcePairing:
-false })` suppresses the notice; `lgtv on --wait` uses it while polling
-(`src/commands/power.ts:35`).
+The listener is registered at `src/sdk/client.ts:512`, before the register frame goes out. Any
+frame that is neither `registered` nor `error` is read as "the prompt is showing" — it does not
+inspect `pairingType`, which has moved across firmware versions — so it fires `onPairingPrompt`
+once and keeps waiting. `PairingFailed` covers a rejection, a closed socket, a `registered`
+frame with no key, and the approval timeout. That timeout is never below 60s
+(`MIN_PAIRING_TIMEOUT_MS`, `client.ts:44`), because a human has to walk to the TV and a 10s
+command timeout must not apply.
 
-`src/domain/pairing.ts` is the manifest every third-party LG remote sends. It carries an RSA
+`keyChanged` is how a granted key gets stored without the SDK knowing what storage is: the
+binding writes it through `session.rememberKey`, and a standalone caller gets the same signal
+as the `onClientKey` callback. Either way it is silent when the TV hands back the key it was
+given, so a re-connection does not rewrite the config file on every command.
+
+`src/sdk/pairing.ts` is the manifest every third-party LG remote sends. It carries an RSA
 signature block the TV verifies, so it must go over the wire byte-for-byte — do not reformat,
 trim permissions, or "clean up" the localized names.
 
 ### The pump
 
-`startPump` (`src/services/Tv.ts:64`) owns a `Map<id, Listener>`. Each in-flight request or
-subscription gets a scoped `Queue` mailbox (`:117`) registered under its id; releasing the scope
-unregisters and shuts the queue down. Frames with no `id`, and frames that fail to decode against
-`IncomingFrame` (`src/domain/ssap.ts:57`), are dropped. On `close` or socket `error` the pump
-flushes every waiter with a `Closed` delivery (→ `TvUnreachable`) and marks itself closed, so
-nothing hangs waiting for a reply that will never come; anyone registering afterwards is failed
-immediately (`:90-96`). Subscriptions are exposed as `Stream` via `Stream.unwrapScoped` over the
-same mailbox (`:247`), which is what makes `lgtv watch` an ordinary stream fold.
-
-Sharp edge: the message handler calls `JSON.parse` unguarded (`:79`), so a non-JSON text frame
-throws inside the `ws` listener rather than being ignored.
+`startPump` (`src/sdk/client.ts:111`) owns a `Map<id, Listener>`. Each in-flight request or
+subscription registers under its id and unregisters however it ends — reply, timeout, abort, or
+the caller closing the subscription. Frames that are not JSON, frames that do not look like
+frames, and frames with no `id` are dropped inside the `ws` listener, where a throw would be an
+uncaught exception rather than a failed call. On `close` or socket `error` the pump flushes
+every waiter with a `Closed` delivery (→ `TvUnreachable`) and marks itself closed, so nothing
+hangs waiting for a reply that will never come; anyone registering afterwards is failed
+immediately (`client.ts:142-148`). A failed *write* takes the same path (`client.ts:296`): a
+send that fails means the socket is broken, which is everyone's problem and not just that
+frame's.
 
 ### Pointer input channel
 
 `ssap://com.webos.service.networkinput/getPointerInputSocket` returns a `socketPath`; that is a
-**second** websocket, opened with the same `openSocket` helper and bound to the same scope
-(`src/services/Tv.ts:340`). It does not speak JSON — it takes plain text frames:
+**second** websocket, opened by the same helper and owned by the connection
+(`src/sdk/client.ts:460`). It does not speak JSON — it takes plain text frames:
 
 ```
 type:button\nname:HOME\n\n
@@ -178,16 +201,66 @@ Remote buttons therefore go over this channel, not over SSAP — `lgtv key` reso
 fire-and-forget, the cursor and key commands sleep ~120ms before the scope closes the socket
 (`src/commands/remote.ts:51`), otherwise the last frame can be lost.
 
+The channel is opened lazily and memoised on the connection, so `key` and `cursor` share one
+socket rather than reopening it every press. It is memoised **on success only**
+(`client.ts:483`): caching the rejection instead would make one transient refusal permanent for
+the life of the connection. The forgetting is done by a separate `.catch` rather than by
+rethrowing into the stored promise, so an abandoned attempt — an interrupted `key` press — still
+counts as handled and does not surface as an unhandled rejection.
+
+### Decoding without a schema library
+
+`src/sdk/decode.ts` is a decoder combinator in ~140 lines: `string`, `number`, `boolean`,
+`array`, `record`, `optional`, `struct`. A `Decoder<A>` is a single method returning
+`{ok: true, value}` or `{ok: false, reason}`, which is small enough that a caller who already
+has zod or `effect/Schema` can plug theirs in instead. `src/sdk/responses.ts` uses it to state
+every reply shape worth narrowing, exporting each as a value *and* a type of the same name so
+`requestAs(Uri.getVolume, VolumeStatus)` reads as the type it returns.
+
+Two decisions worth knowing. Structs **ignore fields they do not mention**: SSAP payloads carry
+firmware- and model-specific extras, and rejecting a reply for saying more than we asked about
+would break on the next TV. And an absent optional field stays absent rather than being
+materialised as `undefined` — the CLI compiles with `exactOptionalPropertyTypes`, and an
+explicit `null` (which a couple of endpoints send) is read the same way as absent.
+
+### The Effect binding
+
+`src/services/Tv.ts` is what is left once the protocol moves out, and it is nearly all
+translation:
+
+- **Failures.** The SDK rejects with `TvUnreachable`, `PairingFailed`, `SsapFailed` or
+  `UnexpectedResponse`; `toDomainError` (`:29`) maps each onto the identically-tagged
+  `Data.TaggedError` in `src/domain/errors.ts`, and `call` (`:48`) puts it in the error channel.
+  Anything that is *not* an `SsapError` dies instead of being mapped — a `TypeError` from a bug
+  must not reach the user dressed as a TV problem. `catchTags` then narrows per method
+  (`:165`): a `request` cannot fail the handshake and decodes nothing, so `PairingFailed` and
+  `UnexpectedResponse` are defects there, and saying so keeps them out of the error type of all
+  22 command handlers.
+- **Interruption.** `connect` is wrapped in `Effect.uninterruptibleMask` rather than
+  `Effect.acquireRelease` (`:134`). `acquireRelease` makes acquisition uninterruptible, and
+  acquisition here includes a pairing wait that can last a minute — Ctrl-C has to work during
+  it. The mask keeps the dial itself interruptible (the SDK takes an `AbortSignal` and closes
+  what it opened) while still guaranteeing the finalizer is registered for a connection that did
+  open. Per-request interruption works the same way: `Effect.tryPromise` hands its signal
+  straight to `connection.request`.
+- **Streams.** `subscribe` is `Stream.asyncPush` over the SDK's callback subscription
+  (`:169`), with the unsubscribe as the release step — which is what makes `lgtv watch` an
+  ordinary stream fold, and what stops a finished `Stream.take` from leaving a listener behind.
+- **`decodeRequest`** (`:94`) expresses `requestAs` in terms of whatever `request` it is given,
+  so anything decorating `request` — `lgtv repl`'s reply echo — covers the decoded calls too
+  instead of silently missing every `requestAs`.
+
 ### Two things that will bite
 
 `socket.send(data, cb)` in `ws` invokes `cb` with `null` on success, not `undefined` — it passes
 the underlying stream callback straight through. Checking `cause === undefined` makes every send
-look like a failure. `sendText` checks both (`src/services/Tv.ts:111-122`).
+look like a failure. `sendText` checks both (`src/sdk/client.ts:100-108`).
 
-Every socket is acquired with `Effect.acquireRelease`, and both `withTv` and the pointer channel
-are `Scope`-bound, so a Ctrl-C during `lgtv watch` or a timeout mid-request still closes the
-connection. Anything new that opens a handle belongs in a scope too; there is no other cleanup
-path.
+On the Effect side every connection is registered with a finalizer and both `withTv` and the
+repl's `Link` are `Scope`-bound, so a Ctrl-C during `lgtv watch` or a timeout mid-request still
+closes the socket. Anything new that opens a handle belongs in a scope too; there is no other
+cleanup path. Inside the SDK the equivalent rule is that every socket goes into the connection's
+`sockets` set, and `close()` is the only thing that takes them down.
 
 ## `lgtv repl`
 
@@ -213,10 +286,10 @@ instead holds one connection open across a whole interactive session, by reusing
   lines — and *post-flight* by resetting the link whenever a dispatched line fails with
   `TvUnreachable`. Neither path retries the line itself: "the socket was already dead" and "the
   frame reached the TV and then the socket died" are indistinguishable, so a silent resend of
-  `key POWER` would be worse than a visible error. The Magic Remote pointer socket is opened
-  lazily and memoised on the connection (not with `Effect.cached`, which stores the whole `Exit`
-  and would cache a transient refusal forever), so `key`/`cursor` share one pointer socket for the
-  session instead of reopening it every press.
+  `key POWER` would be worse than a visible error. `Link` used to memoise the Magic Remote
+  pointer socket per generation as well; it no longer does, because the SDK memoises the channel
+  on the connection itself (*Pointer input channel* above) — which is where it always belonged,
+  since "one pointer socket per connection" is true of any caller and not just the repl.
 - **`src/services/LineReader.ts`** wraps `node:readline`, chosen over `@effect/platform`
   `Terminal.readLine` and `@effect/cli` `Prompt.text` because it is the only one that gives
   history, tab completion, a `SIGINT` event, echo, and non-TTY piped stdin from one API. Its
@@ -232,12 +305,13 @@ instead holds one connection open across a whole interactive session, by reusing
   `Tv` handed to `CurrentTv` for one line is wrapped by `echoing`
   (`src/commands/repl.ts`), which taps `request` and prints each payload to stderr as it arrives,
   plus a `← no response` flag when a *successful* line produced none — a failed line has already
-  said what happened. So that the wrapper cannot miss the schema-decoded calls, `requestAs` is no
-  longer written out inside `connect` but derived from whatever `request` it is given, via the
-  exported `decodeRequest` (`src/services/Tv.ts`); wrapping `request` therefore covers both.
+  said what happened. So that the wrapper cannot miss the decoded calls, `requestAs` is not
+  written out inside `connect` but derived from whatever `request` it is given, via the
+  exported `decodeRequest` (`src/services/Tv.ts:94`); wrapping `request` therefore covers both.
   Subscriptions are marked heard but not echoed (`watch` prints every update itself), and
-  `pointer` is left undecorated, so the one-off `getPointerInputSocket` exchange stays out of the
-  echo and key/cursor lines — write-only on the input socket — get the flag.
+  `pointer` is left undecorated — it resolves inside the SDK, off the connection's own memoised
+  channel — so the one-off `getPointerInputSocket` exchange stays out of the echo and key/cursor
+  lines, write-only on the input socket, get the flag.
 
 Two things worth knowing if you extend this:
 
@@ -267,10 +341,11 @@ resolves only once every send has completed, so the socket is not closed early.
 
 The MAC itself is learned at pairing time (`src/commands/setup.ts:53`) and needs *two* calls,
 because the connection manager splits what we need across them: `getinfo`
-(`src/domain/ssap.ts:55`) carries a `macAddress` per interface but lists every interface whether
+(`src/sdk/uri.ts:55`) carries a `macAddress` per interface but lists every interface whether
 or not it has a link, while `getstatus` (`:56`) carries the link state and no MACs. Both are
 lowercase on the wire — `getStatus` answers `404 no such service or method`.
-`macForActiveInterface` (`:176`) joins them and prefers the connected interface; a naive
+`macForActiveInterface` (`src/sdk/responses.ts:134`) joins them and prefers the connected
+interface; a naive
 "wired first" pick silently stores the dead NIC's MAC on a TV that is on Wi-Fi, and Wake-on-LAN
 then fails with nothing to see. `pair` also warns when the TV is on Wi-Fi with
 `isWakeOnWifiEnabled: false`, since no magic packet can wake it in that state.
@@ -324,6 +399,12 @@ header comment claims rendering lives in `ui.ts`; it does not, and `ui.ts` never
 `NotPaired` is declared and rendered but never constructed anywhere: `connect` always sends the
 register frame, so a missing key just means the TV shows the prompt. Wire it up or delete it.
 
+Four of those tags are duplicated on purpose. `src/sdk/errors.ts` declares `TvUnreachable`,
+`PairingFailed`, `SsapFailed` and `UnexpectedResponse` as plain `Error` subclasses with the
+same `_tag`s and the same fields, because an SDK that made its callers install `effect` to read
+a failure would not be standalone. `toDomainError` (`src/services/Tv.ts:29`) is the one place
+they are translated, and matching the names is what keeps it a `switch` with no thinking in it.
+
 `bin.ts` and `repl.ts` both classify failures with `isLgTvError` and render them with `render`
 (`src/domain/errors.ts`), which checks tags against a `satisfies Record<LgTvError["_tag"], true>`
 map — so forgetting to list a new error there is a compile error, not a silent gap the way a
@@ -355,18 +436,22 @@ counts open sockets and prompts, and records every frame verbatim in `rawFrames`
 
 ### The contract suite
 
-`test/contract/` is the harness that has to survive detaching the protocol client from Effect.
+`test/contract/` is the harness that had to survive detaching the protocol client from Effect,
+and now holds the two implementations to one description of it.
 `client.ts` defines a plain Promise-shaped seam — no `effect` import anywhere in it — and
 `suite.ts` states the client's behaviour against that seam only: handshake outcomes, refusal
 shapes, request timeout, dropped sockets, out-of-order demultiplexing, decode failures,
-subscription lifetime, pointer frames, and socket teardown. `effect-client.ts` adapts today's
-implementation to the seam, handing `connect` a literal `SessionApi` — no `Settings`, no
-filesystem — because where the client key is *stored* is the CLI's concern, not the protocol's.
+subscription lifetime, pointer frames, and socket teardown. Two adapters implement it:
+`plain-client.ts` for `src/sdk` on its own, and `effect-client.ts` for the binding, handing
+`connect` a literal `SessionApi` — no `Settings`, no filesystem — because where the client key
+is *stored* is the CLI's concern, not the protocol's. `test/contract.test.ts` runs the suite
+and the wire transcript against both.
 
-The point is that a second adapter (`plain-client.ts`) can be added for an Effect-free SDK and
-both run green from the same cases until the Effect binding is retired. `suite.ts` and `wire.ts`
-should not need editing during that port; if they do, the rewrite changed behaviour rather than
-structure.
+Neither `suite.ts` nor `wire.ts` was edited while the SDK was extracted, which was the point of
+writing them that way: a case that had needed changing would have meant the port changed
+behaviour rather than structure. Keep it that way — a behaviour only one implementation has does
+not belong in `suite.ts`, and if the Effect binding is ever retired, deleting
+`effect-client.ts` is the whole job.
 
 `test/contract/wire.ts` is a golden transcript — exact frame shapes, the per-connection `lgtv-N`
 counter, and a **frozen sha256 of the serialised pairing manifest**. The behavioural tests cannot
@@ -378,6 +463,13 @@ exact bytes. Changing the checksum means you have a new signature and have teste
 `Settings` (`LGTV_CONFIG_DIR` points at a `mkdtemp` directory), which is what keeps the *service
 graph* under test — the contract suite deliberately bypasses it. Transport resolution lives here
 for the same reason.
+
+`test/sdk.test.ts` covers what only the SDK has. Its *protocol* behaviour is not there — that is
+the contract suite — but three things are: the independence itself (no file under `src/sdk`
+imports `effect`, reaches into the rest of the repo, or depends on anything but `ws`, checked by
+reading the sources), the decoders including the exact text of a failure path, and subscriptions
+as an async iterable, which has no Effect counterpart to compare against and so cannot be stated
+through the contract seam.
 
 `test/units.test.ts` covers the pure helpers worth isolating: `parseMac`, `macForActiveInterface`,
 `resolveButton`, the YouTube link parsing, and `tokenize`.
@@ -406,7 +498,8 @@ exercises several of them end to end through dispatch, but not each one's own ed
 ## Why the protocol is hand-rolled
 
 Summarised in the [README](../README.md#why-not-the-lgtv2-package): `lgtv2` is callback-based,
-untyped and unmaintained since 2022. Structurally, the direct implementation buys schema-decoded
-responses, typed errors in the error channel, scope-bound sockets and subscriptions as real
-`Stream`s — none of which can be retrofitted onto an `EventEmitter` API without wrapping every
-call anyway.
+untyped and unmaintained since 2022. Structurally, the direct implementation buys decoded
+responses, typed failures, one properly demultiplexed socket and subscriptions you can iterate —
+none of which can be retrofitted onto an `EventEmitter` API without wrapping every call anyway.
+The Effect binding then adds scope-bound sockets, real `Stream`s and errors in the error channel
+on top, without any of that reaching the wire.

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { createHash } from "node:crypto"
 import { afterEach, beforeEach, describe, it } from "node:test"
-import { pairingManifest } from "../../src/domain/pairing.js"
+import { pairingManifest } from "../../src/sdk/index.js"
 import { startFakeTv, type FakeTv } from "../fake-tv.js"
 import { delay, type Connection, type ContractClient } from "./client.js"
 
@@ -86,7 +86,7 @@ export const runWireTests = (client: ContractClient): void => {
       assert.ok(raw !== undefined, "the first frame should be the handshake")
       assert.ok(
         raw.includes(`"manifest":${serialised}`),
-        "the manifest must reach the TV exactly as declared in src/domain/pairing.ts"
+        "the manifest must reach the TV exactly as declared in src/sdk/pairing.ts"
       )
     })
 

@@ -87,12 +87,12 @@ const echoing = (tv: Tv, heard: Ref.Ref<boolean>): Tv => {
     // stream that can run for minutes. Marking them heard is enough to keep
     // `watch` out of the "no response" case.
     subscribe: (uri) => Stream.tap(tv.subscribe(uri), () => Ref.set(heard, true))
-    // `pointer` is left alone deliberately: it comes off `Link`'s decorated
-    // `Tv` and reaches for the generation's own `requestAs`, so the one-off
-    // `getPointerInputSocket` exchange stays out of the echo — it is
-    // connection plumbing, not an answer to the line that was typed. The
-    // input socket itself is write-only, so key/cursor lines have no reply
-    // to show and are flagged accordingly.
+    // `pointer` is left alone deliberately: it resolves inside the SDK, off
+    // the connection's own memoised channel rather than through the `request`
+    // wrapped above, so the one-off `getPointerInputSocket` exchange stays out
+    // of the echo — it is connection plumbing, not an answer to the line that
+    // was typed. The input socket itself is write-only, so key/cursor lines
+    // have no reply to show and are flagged accordingly.
   }
 }
 

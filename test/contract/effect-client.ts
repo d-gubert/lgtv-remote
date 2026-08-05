@@ -1,6 +1,6 @@
-import { Cause, Chunk, Duration, Effect, Exit, Layer, Option, Schema, Scope, Stream } from "effect"
+import { Cause, Chunk, Duration, Effect, Exit, Layer, Option, Scope, Stream } from "effect"
 import { TvNotConfigured } from "../../src/domain/errors.js"
-import { LaunchPoints, PointerSocket, VolumeStatus } from "../../src/domain/ssap.js"
+import { LaunchPoints, PointerSocket, VolumeStatus, type Decoder } from "../../src/sdk/index.js"
 import { Session, type SessionApi } from "../../src/services/Session.js"
 import { connect, type Tv } from "../../src/services/Tv.js"
 import {
@@ -57,12 +57,12 @@ const runOrThrow = async <A, E>(effect: Effect.Effect<A, E, never>): Promise<A> 
 }
 
 /**
- * The contract names a shape; this adapter decides it means an `effect/Schema`.
- * The erasure to `unknown` is the whole point — the suite must not know.
+ * The contract names a shape; each adapter decides what that means. The
+ * erasure to `unknown` is the whole point — the suite must not know.
  */
-const schemas = { VolumeStatus, LaunchPoints, PointerSocket } as unknown as Record<
+const decoders = { VolumeStatus, LaunchPoints, PointerSocket } as unknown as Record<
   ResponseShape,
-  Schema.Schema<unknown, unknown>
+  Decoder<unknown>
 >
 
 const sessionLayer = (options: ConnectOptions) => {
@@ -107,7 +107,7 @@ export const effectClient: ContractClient = {
       clientKey: tv.clientKey,
       request: (uri, payload) => run(tv.request(uri, payload)) as Promise<Payload>,
       requestAs: (uri, shape, payload) =>
-        run(tv.requestAs(uri, schemas[shape], payload)).then((decoded) => decoded as Payload),
+        run(tv.requestAs(uri, decoders[shape], payload)).then((decoded) => decoded as Payload),
       subscribe: async (uri, count) => {
         const chunk = await run(Stream.runCollect(Stream.take(tv.subscribe(uri), count)))
         return Chunk.toReadonlyArray(chunk) as ReadonlyArray<Payload>

@@ -7,6 +7,13 @@
     "lgtv": "./dist/bin.js"
   },
   "main": "./dist/bin.js",
+  "exports": {
+    ".": "./dist/bin.js",
+    "./sdk": {
+      "types": "./dist/sdk/index.d.ts",
+      "default": "./dist/sdk/index.js"
+    }
+  },
   "engines": {
     "node": ">=22"
   },

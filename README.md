@@ -182,10 +182,11 @@ channel. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) covers how this codebase
 
 | Layer | What it does |
 | --- | --- |
-| `src/domain/` | SSAP endpoints and response schemas, button names, YouTube link parsing, the pairing manifest, and every error as data. |
+| `src/sdk/` | The SSAP client itself: websocket, pairing handshake, request/response demultiplexing by frame id, subscriptions, response decoders and the Magic Remote input socket. Plain Promises; `ws` is its only dependency. |
+| `src/domain/` | Button names, YouTube link parsing, line tokenizing, and every CLI error as data. |
 | `src/services/Settings.ts` | The config file: default host, per-TV MAC, client key and transport. |
 | `src/services/Session.ts` | Resolves flags → env → saved settings into a URL, key and MAC. Resolution is lazy, so `discover` works before anything is configured. |
-| `src/services/Tv.ts` | The SSAP client: scoped websocket, handshake, request/response demultiplexing by frame id, subscriptions as `Stream`s, and the Magic Remote input socket. |
+| `src/services/Tv.ts` | Binds the SDK to Effect: failures as typed values, sockets tied to a `Scope`, subscriptions as `Stream`s, and the client key read through `Session`. |
 | `src/services/Discovery.ts` | SSDP `M-SEARCH`, then the UPnP description for the friendly name. |
 | `src/services/Wol.ts` | Wake-on-LAN magic packets, sent to the global *and* subnet broadcast on ports 9 and 7. |
 | `src/commands/` | One file per command group. |
@@ -193,14 +194,47 @@ channel. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) covers how this codebase
 Sockets are tied to an Effect `Scope`, so an interrupted command (Ctrl-C during `watch`, a
 timeout) still closes its connection.
 
+### Using the SSAP client on its own
+
+The protocol client is a standalone SDK — no Effect, no CLI, nothing to configure:
+
+```ts
+import { connect, Uri, VolumeStatus } from "lgtv-remote/sdk"
+
+const tv = await connect({
+  host: "192.168.0.230",
+  clientKey: savedKey,                       // omit on first pairing
+  onPairingPrompt: () => console.log("accept the prompt on the TV"),
+  onClientKey: (key) => save(key)            // only fires when the key changes
+})
+
+await tv.request(Uri.setVolume, { volume: 20 })
+const { volume } = await tv.requestAs(Uri.getVolume, VolumeStatus)
+
+for await (const update of tv.updates(Uri.getVolume)) {
+  console.log(update["volume"])
+  break
+}
+
+const pointer = await tv.pointer()
+await pointer.button("HOME")
+
+await tv.close()
+```
+
+Failures reject with `TvUnreachable`, `PairingFailed`, `SsapFailed` or `UnexpectedResponse` —
+all `instanceof SsapError`, each carrying a `_tag` to switch on. Where the client key is
+*stored*, how a TV is found, and what the user is told are all the caller's business; the SDK
+reports the key it was granted and calls back when a prompt goes up.
+
 ### Why not the `lgtv2` package?
 
 `lgtv2` is the well-known Node library for this protocol, but it is callback-based, ships
-no types, and was last published in 2022. The protocol itself is small, so `src/services/Tv.ts`
-implements it directly against `ws` — which buys typed responses via `effect/Schema`, typed
-errors, scoped connections, and subscriptions as real streams. Its pairing manifest is the
-same one every third-party remote sends; the TV verifies the signature, so it must go over
-the wire verbatim.
+no types, and was last published in 2022. The protocol itself is small, so `src/sdk/`
+implements it directly against `ws` — which buys decoded responses, typed failures, one
+socket properly demultiplexed, and a subscription you can `for await` over. Its pairing
+manifest is the same one every third-party remote sends; the TV verifies the signature, so
+it must go over the wire verbatim.
 
 ## Tests
 
@@ -212,6 +246,9 @@ npm test
 first, then a granted key), answers requests, refuses others with both error frames and
 `returnValue: false`, serves a pointer input socket, and pushes subscription updates. The
 suite drives the real client against it, so the protocol code is covered without hardware.
+
+`test/contract.test.ts` runs one description of the protocol against *both* the standalone
+SDK and the Effect binding, so the two cannot drift apart.
 
 ## Troubleshooting
 

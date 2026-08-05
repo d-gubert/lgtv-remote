@@ -48,7 +48,7 @@ and regions, so probe before concluding an endpoint is missing — see
 
 Some 2023-and-newer models accept **only** the secure port. The certificate is self-signed and
 issued to an internal LG hostname, so `rejectUnauthorized: false` (or the equivalent) is
-mandatory — `src/services/Tv.ts:32`.
+mandatory — `src/sdk/client.ts:64`.
 
 Everything travels as **WebSocket text frames containing one JSON object each**. There is no
 binary framing, no compression, and no length prefix. A single connection carries every request,
@@ -88,7 +88,7 @@ Seven frame types exist. `type` is always present, and `id` on everything the TV
 
 A subscription push is indistinguishable from a normal response except that it reuses an id you
 already received an answer for. Demultiplexing therefore has to be *by id into a mailbox*, not
-request/reply pairing — `startPump` in `src/services/Tv.ts:64`.
+request/reply pairing — `startPump` in `src/sdk/client.ts:111`.
 
 ### Request frame
 
@@ -98,7 +98,7 @@ request/reply pairing — `startPump` in `src/services/Tv.ts:64`.
 
 `id` is client-chosen and opaque to the TV; it is echoed back untouched. This CLI uses
 `register_0` for the handshake and `lgtv-N` from a per-connection counter for everything else
-(`src/services/Tv.ts:212`). Omit `payload` entirely for methods that take no arguments — sending
+(`src/sdk/client.ts:338`). Omit `payload` entirely for methods that take no arguments — sending
 `"payload": {}` is also accepted.
 
 ### Success
@@ -164,7 +164,7 @@ arguments and reading it.
 ```
 
 The frame `type` is `response`, not `error`. Only `returnValue: false` marks it as a failure.
-This CLI collapses both shapes into one `SsapFailed` error at `src/services/Tv.ts:137-155`.
+This CLI collapses both shapes into one `SsapFailed` error at `src/sdk/client.ts:154-166`.
 
 Some endpoints nest a third layer, where the outer call succeeded but the service it proxied to
 did not:
@@ -233,13 +233,13 @@ Rules that matter:
   `registered` payload rather than assuming yours was accepted.
 - **`registered` can arrive with no key.** Treat that as a pairing failure.
 - **Allow ~60 seconds**, not a normal command timeout — a human has to walk to the TV. This CLI
-  uses `max(--timeout, 60s)` for the handshake only (`src/services/Tv.ts:315`).
+  uses `max(--timeout, 60s)` for the handshake only (`src/sdk/client.ts:525`).
 - `pairingType` may also be `PIN`, in which case the TV shows a number and expects
   `ssap://pairing/setPin`. The reference TV never used it and this CLI does not implement it.
 
 ### 4.2 The manifest
 
-`src/domain/pairing.ts` holds the manifest every third-party LG remote sends. It identifies the
+`src/sdk/pairing.ts` holds the manifest every third-party LG remote sends. It identifies the
 client as LG's own test app (`com.lge.test`, "LG Remote App") and carries an RSA-SHA256 signature
 block that the TV verifies.
 
@@ -921,7 +921,7 @@ Booleans here are real JSON booleans, unlike `getSystemSettings` values.
 > **You need both calls to pick the right MAC for Wake-on-LAN.** Neither is sufficient alone:
 > `getinfo` lists a wired MAC on a TV that has never had a cable plugged in, so "prefer wired"
 > silently stores the dead NIC's address; `getstatus` says which interface is live but carries no
-> MAC. Join them — `macForActiveInterface` in `src/domain/ssap.ts:176`.
+> MAC. Join them — `macForActiveInterface` in `src/sdk/responses.ts:134`.
 
 `isWakeOnWifiEnabled: false` on a Wi-Fi-connected TV means **no magic packet can ever wake it**,
 regardless of router configuration. Check it at pairing time and warn — `src/commands/setup.ts:73`.

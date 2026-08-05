@@ -1,6 +1,6 @@
 import { Command, Options } from "@effect/cli"
 import { Console, Duration, Effect, Either, Option, Schedule } from "effect"
-import { Uri } from "../domain/ssap.js"
+import { Uri } from "../sdk/index.js"
 import { Session } from "../services/Session.js"
 import { connect, withTv } from "../services/Tv.js"
 import { parseMac, wake } from "../services/Wol.js"

@@ -1,5 +1,4 @@
-import { Console, Context, Duration, Effect, Option, Queue, Schema, Scope, Stream } from "effect"
-import WebSocket from "ws"
+import { Console, Context, Duration, Effect, Option, Scope, Stream } from "effect"
 import {
   PairingFailed,
   SettingsUnreadable,
@@ -8,151 +7,50 @@ import {
   TvUnreachable,
   UnexpectedResponse
 } from "../domain/errors.js"
-import { pairingManifest } from "../domain/pairing.js"
-import { AnyPayload, IncomingFrame, PointerSocket, Uri } from "../domain/ssap.js"
+import * as Ssap from "../sdk/index.js"
 import { Session } from "./Session.js"
 
-/** What the message pump hands to whoever is waiting on a frame id. */
-type Delivery =
-  | { readonly _tag: "Frame"; readonly frame: IncomingFrame }
-  | { readonly _tag: "Closed"; readonly reason: string }
+/**
+ * The Effect binding for `src/sdk` — the protocol itself lives there, and
+ * nothing in this file speaks websockets.
+ *
+ * What it adds is what Effect is here for: failures as typed values in the
+ * error channel rather than rejections, sockets tied to a `Scope` so a Ctrl-C
+ * mid-request still closes them, subscriptions as `Stream`s, and the client key
+ * resolved through `Session` instead of passed in by hand.
+ */
 
-type Listener = (delivery: Delivery) => void
+export type AnyPayload = Ssap.Payload
 
-const decodeFrame = Schema.decodeUnknownOption(IncomingFrame)
+/** Anything the protocol itself can raise, once it is in the error channel. */
+type ProtocolError = TvUnreachable | PairingFailed | SsapFailed | UnexpectedResponse
 
-/** Opens a websocket and ties its lifetime to the current scope. */
-const openSocket = (
-  url: string,
-  timeout: Duration.Duration
-): Effect.Effect<WebSocket, TvUnreachable, Scope.Scope> =>
-  Effect.acquireRelease(
-    Effect.async<WebSocket, TvUnreachable>((resume) => {
-      const socket = new WebSocket(url, {
-        // webOS presents a self-signed certificate on the secure port.
-        rejectUnauthorized: false,
-        handshakeTimeout: Duration.toMillis(timeout)
-      })
-      const detach = () => {
-        socket.off("open", onOpen)
-        socket.off("error", onError)
-      }
-      const onOpen = () => {
-        detach()
-        resume(Effect.succeed(socket))
-      }
-      const onError = (cause: Error) => {
-        detach()
-        socket.terminate()
-        resume(Effect.fail(new TvUnreachable({ url, cause })))
-      }
-      socket.once("open", onOpen)
-      socket.once("error", onError)
-      return Effect.sync(() => {
-        detach()
-        socket.terminate()
-      })
-    }),
-    (socket) =>
-      Effect.sync(() => {
-        socket.removeAllListeners()
-        socket.close()
-      })
-  )
-
-/** Demultiplexes incoming frames by their request id. */
-const startPump = (socket: WebSocket) =>
-  Effect.sync(() => {
-    const listeners = new Map<string, Listener>()
-    let closed: string | undefined
-
-    const shutdown = (reason: string) => {
-      if (closed !== undefined) return
-      closed = reason
-      for (const listener of [...listeners.values()]) {
-        listener({ _tag: "Closed", reason })
-      }
-      listeners.clear()
-    }
-
-    socket.on("message", (raw) => {
-      // This runs inside a `ws` event listener, so anything thrown here is an
-      // uncaught exception. Junk on the wire must be dropped, not raised.
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(String(raw))
-      } catch {
-        return
-      }
-      const frame = decodeFrame(parsed)
-      if (Option.isNone(frame)) return
-      const id = frame.value.id
-      if (id === undefined) return
-      listeners.get(id)?.({ _tag: "Frame", frame: frame.value })
-    })
-    socket.on("close", (code) => shutdown(`connection closed by the TV (code ${code})`))
-    socket.on("error", (cause: Error) => shutdown(cause.message))
-
-    return {
-      isClosed: () => closed,
-      register: (id: string, listener: Listener) => {
-        if (closed !== undefined) {
-          listener({ _tag: "Closed", reason: closed })
-          return
-        }
-        listeners.set(id, listener)
-      },
-      unregister: (id: string) => listeners.delete(id)
-    }
-  })
-
-type Pump = Effect.Effect.Success<ReturnType<typeof startPump>>
-
-const sendText = (socket: WebSocket, url: string, data: string) =>
-  Effect.async<void, TvUnreachable>((resume) => {
-    // `ws` hands the stream's callback straight through, so success arrives as
-    // `null` rather than `undefined`.
-    socket.send(data, (cause) => {
-      resume(
-        cause === undefined || cause === null
-          ? Effect.void
-          : Effect.fail(new TvUnreachable({ url, cause }))
-      )
-    })
-  })
-
-/** A scoped mailbox for one request id. */
-const mailbox = (pump: Pump, id: string) =>
-  Effect.acquireRelease(
-    Effect.map(Queue.unbounded<Delivery>(), (queue) => {
-      pump.register(id, (delivery) => {
-        queue.unsafeOffer(delivery)
-      })
-      return queue
-    }),
-    (queue) =>
-      Effect.sync(() => pump.unregister(id)).pipe(Effect.zipRight(Queue.shutdown(queue)))
-  )
-
-const interpret = (
-  url: string,
-  uri: string,
-  delivery: Delivery
-): Effect.Effect<AnyPayload, SsapFailed | TvUnreachable> => {
-  if (delivery._tag === "Closed") {
-    return Effect.fail(new TvUnreachable({ url, cause: delivery.reason }))
+/** The SDK reports failure by rejecting; the CLI wants it in the error channel. */
+const toDomainError = (error: Ssap.AnySsapError): ProtocolError => {
+  switch (error._tag) {
+    case "TvUnreachable":
+      return new TvUnreachable({ url: error.url, cause: error.cause })
+    case "PairingFailed":
+      return new PairingFailed({ url: error.url, detail: error.detail })
+    case "SsapFailed":
+      return new SsapFailed({ uri: error.uri, detail: error.detail })
+    case "UnexpectedResponse":
+      return new UnexpectedResponse({ uri: error.uri, detail: error.detail })
   }
-  const frame = delivery.frame
-  if (frame.type === "error") {
-    return Effect.fail(new SsapFailed({ uri, detail: frame.error ?? "unspecified error" }))
-  }
-  const payload = (frame.payload ?? {}) as Record<string, unknown>
-  if (payload["returnValue"] === false) {
-    const detail = payload["errorText"] ?? payload["errorCode"] ?? "the TV returned no reason"
-    return Effect.fail(new SsapFailed({ uri, detail: String(detail) }))
-  }
-  return Effect.succeed(payload)
 }
+
+/**
+ * Runs one SDK call. Anything that is not an `SsapError` is a bug rather than a
+ * protocol outcome, so it dies instead of being folded into a typed failure —
+ * mapping it would put a `TypeError` in front of the user dressed up as a TV
+ * problem.
+ */
+const call = <A>(work: (signal: AbortSignal) => Promise<A>): Effect.Effect<A, ProtocolError> =>
+  Effect.tryPromise({ try: work, catch: (error) => error }).pipe(
+    Effect.catchAll((error) =>
+      Ssap.isSsapError(error) ? Effect.fail(toDomainError(error)) : Effect.die(error)
+    )
+  )
 
 export interface PointerInput {
   readonly button: (name: string) => Effect.Effect<void, TvUnreachable>
@@ -169,18 +67,14 @@ export interface Tv {
     uri: string,
     payload?: Record<string, unknown>
   ) => Effect.Effect<AnyPayload, SsapFailed | TvUnreachable>
-  readonly requestAs: <A, I>(
+  readonly requestAs: <A>(
     uri: string,
-    schema: Schema.Schema<A, I>,
+    decoder: Ssap.Decoder<A>,
     payload?: Record<string, unknown>
   ) => Effect.Effect<A, SsapFailed | TvUnreachable | UnexpectedResponse>
   readonly subscribe: (uri: string) => Stream.Stream<AnyPayload, SsapFailed | TvUnreachable>
-  /** Opens the Magic-Remote input channel; scoped to the connection. */
-  readonly pointer: Effect.Effect<
-    PointerInput,
-    SsapFailed | TvUnreachable | UnexpectedResponse,
-    Scope.Scope
-  >
+  /** The Magic-Remote input channel, opened once per connection and shared. */
+  readonly pointer: Effect.Effect<PointerInput, SsapFailed | TvUnreachable | UnexpectedResponse>
   /** `some(reason)` once the socket has gone; every request will fail. */
   readonly closed: Effect.Effect<Option.Option<string>>
 }
@@ -199,14 +93,13 @@ export class CurrentTv extends Context.Tag("lgtv/CurrentTv")<CurrentTv, Tv>() {}
  */
 export const decodeRequest =
   (request: Tv["request"]): Tv["requestAs"] =>
-  (uri, schema, payload) =>
-    Effect.flatMap(request(uri, payload), (result) =>
-      Schema.decodeUnknown(schema)(result).pipe(
-        Effect.mapError(
-          (issue) => new UnexpectedResponse({ uri, detail: issue.message.split("\n")[0] ?? "" })
-        )
-      )
-    )
+  (uri, decoder, payload) =>
+    Effect.flatMap(request(uri, payload), (result) => {
+      const decoded = decoder.decode(result)
+      return decoded.ok
+        ? Effect.succeed(decoded.value)
+        : Effect.fail(new UnexpectedResponse({ uri, detail: decoded.reason }))
+    })
 
 export type ConnectError =
   | TvUnreachable
@@ -218,8 +111,8 @@ export type ConnectError =
 
 /**
  * Connects, completes the webOS handshake, and stores the client key the TV
- * hands back. `announce` is used to tell the user to look at the screen the
- * first time they pair.
+ * hands back. `announcePairing` is used to tell the user to look at the screen
+ * the first time they pair.
  */
 export const connect = (
   options: { readonly announcePairing?: boolean } = {}
@@ -230,131 +123,104 @@ export const connect = (
     const url = yield* session.wsUrl
     const storedKey = yield* session.clientKey
 
-    const socket = yield* openSocket(url, session.timeout)
-    const pump = yield* startPump(socket)
+    const announce = () =>
+      Effect.runSync(Console.error("→ Accept the pairing request on your TV screen…"))
 
-    let counter = 0
-    const nextId = () => `lgtv-${++counter}`
-
-    const sendJson = (frame: Record<string, unknown>) =>
-      sendText(socket, url, JSON.stringify(frame))
-
-    const request = (uri: string, payload?: Record<string, unknown>) =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const id = nextId()
-          const queue = yield* mailbox(pump, id)
-          yield* sendJson({
-            id,
-            type: "request",
-            uri,
-            ...(payload === undefined ? {} : { payload })
+    // Not `Effect.acquireRelease`, which would make the whole handshake
+    // uninterruptible — pairing can wait a minute for someone to walk to the
+    // TV, and Ctrl-C has to work during it. The mask keeps the dial itself
+    // interruptible while guaranteeing the finalizer is registered for a
+    // connection that did open.
+    const connection = yield* Effect.uninterruptibleMask((restore) =>
+      restore(
+        call((signal) =>
+          Ssap.connect({
+            host,
+            url,
+            signal,
+            timeoutMs: Duration.toMillis(session.timeout),
+            ...(Option.isSome(storedKey) ? { clientKey: storedKey.value } : {}),
+            ...(options.announcePairing === false ? {} : { onPairingPrompt: announce })
           })
-          const delivery = yield* Queue.take(queue)
-          return yield* interpret(url, uri, delivery)
-        })
+        )
       ).pipe(
-        Effect.timeoutFail({
-          duration: session.timeout,
-          onTimeout: () =>
-            new SsapFailed({
-              uri,
-              detail: `no reply within ${Duration.toSeconds(session.timeout)}s`
-            })
-        })
+        Effect.tap((open) =>
+          Effect.addFinalizer(() => Effect.promise(() => open.close()))
+        )
       )
+    )
 
-    const requestAs = decodeRequest(request)
+    if (connection.keyChanged) {
+      yield* session.rememberKey(host, connection.clientKey)
+    }
 
-    const closed = Effect.sync(() => Option.fromNullable(pump.isClosed()))
+    // `call` carries every protocol failure because `connect` can produce every
+    // protocol failure. Sending a frame cannot: the handshake is long over, and
+    // `request` decodes nothing. Saying so as a defect keeps those two out of
+    // the error channel of all 22 command handlers.
+    const impossible = { PairingFailed: Effect.die, UnexpectedResponse: Effect.die }
+
+    const request: Tv["request"] = (uri, payload) =>
+      call((signal) => connection.request(uri, payload, { signal })).pipe(
+        Effect.catchTags(impossible)
+      )
 
     const subscribe = (uri: string) =>
-      Stream.unwrapScoped(
-        Effect.gen(function* () {
-          const id = nextId()
-          const queue = yield* mailbox(pump, id)
-          yield* sendJson({ id, type: "subscribe", uri })
-          return Stream.fromQueue(queue).pipe(
-            Stream.mapEffect((delivery) => interpret(url, uri, delivery))
-          )
-        })
+      Stream.asyncPush<AnyPayload, SsapFailed | TvUnreachable>(
+        (emit) =>
+          Effect.acquireRelease(
+            Effect.sync(() =>
+              connection.subscribe(uri, {
+                onUpdate: (payload) => {
+                  emit.single(payload)
+                },
+                onError: (error) => {
+                  // The SDK types this callback as the two a subscription can
+                  // raise; `toDomainError` is written against the whole union
+                  // and cannot say so on the way back out.
+                  emit.fail(toDomainError(error) as SsapFailed | TvUnreachable)
+                }
+              })
+            ),
+            (subscription) => Effect.sync(() => subscription.close())
+          ),
+        { bufferSize: "unbounded" }
       )
 
-    // ---- handshake ----------------------------------------------------------
-
-    const registerId = "register_0"
-    const clientKey = yield* Effect.scoped(
-      Effect.gen(function* () {
-        const queue = yield* mailbox(pump, registerId)
-        yield* sendJson({
-          id: registerId,
-          type: "register",
-          payload: {
-            ...pairingManifest,
-            ...(Option.isSome(storedKey) ? { "client-key": storedKey.value } : {})
-          }
-        })
-
-        let announced = false
-        const awaitKey: Effect.Effect<string, PairingFailed | TvUnreachable> = Effect.gen(
-          function* () {
-            const delivery = yield* Queue.take(queue)
-            if (delivery._tag === "Closed") {
-              return yield* Effect.fail(new PairingFailed({ url, detail: delivery.reason }))
-            }
-            const frame = delivery.frame
-            if (frame.type === "error") {
-              return yield* Effect.fail(
-                new PairingFailed({ url, detail: frame.error ?? "the TV rejected the handshake" })
-              )
-            }
-            if (frame.type === "registered") {
-              const key = (frame.payload as Record<string, unknown> | undefined)?.["client-key"]
-              return typeof key === "string"
-                ? key
-                : yield* Effect.fail(
-                    new PairingFailed({ url, detail: "the TV returned no client key" })
-                  )
-            }
-            // A "response" frame here means the TV is showing the pairing dialog.
-            if (!announced && options.announcePairing !== false) {
-              announced = true
-              yield* Console.error("→ Accept the pairing request on your TV screen…")
-            }
-            return yield* awaitKey
-          }
+    // The pointer channel is write-only, so the only thing a write can report
+    // is that the socket has gone; anything else is a bug worth a defect.
+    const write = (work: () => Promise<void>): Effect.Effect<void, TvUnreachable> =>
+      Effect.tryPromise({ try: work, catch: (error) => error }).pipe(
+        Effect.catchAll((error) =>
+          error instanceof Ssap.TvUnreachable
+            ? Effect.fail(new TvUnreachable({ url: error.url, cause: error.cause }))
+            : Effect.die(error)
         )
+      )
 
-        // Pairing needs a human; give them appreciably longer than a command.
-        return yield* awaitKey.pipe(
-          Effect.timeoutFail({
-            duration: Duration.max(session.timeout, Duration.seconds(60)),
-            onTimeout: () => new PairingFailed({ url, detail: "timed out waiting for approval" })
-          })
-        )
+    // No signal: the channel belongs to the connection, not to whichever
+    // command happened to open it, so an interrupted `key` must not abort a
+    // socket the next line is about to reuse.
+    const pointer = Effect.map(
+      call(() => connection.pointer()).pipe(Effect.catchTag("PairingFailed", Effect.die)),
+      (input): PointerInput => ({
+        button: (name) => write(() => input.button(name)),
+        click: write(() => input.click()),
+        move: (dx, dy, drag) => write(() => input.move(dx, dy, drag)),
+        scroll: (dx, dy) => write(() => input.scroll(dx, dy))
       })
     )
 
-    if (Option.getOrUndefined(storedKey) !== clientKey) {
-      yield* session.rememberKey(host, clientKey)
+    return {
+      url: connection.url,
+      host: connection.host,
+      clientKey: connection.clientKey,
+      request,
+      requestAs: decodeRequest(request),
+      subscribe,
+      pointer,
+      closed: Effect.sync(() => Option.fromNullable(connection.closed))
     }
-
-    // ---- Magic Remote channel ----------------------------------------------
-
-    const pointer = Effect.gen(function* () {
-      const { socketPath } = yield* requestAs(Uri.pointerSocket, PointerSocket)
-      const input = yield* openSocket(socketPath, session.timeout)
-      const write = (frame: string) => sendText(input, socketPath, frame)
-      return {
-        button: (name: string) => write(`type:button\nname:${name}\n\n`),
-        click: write("type:click\n\n"),
-        move: (dx: number, dy: number, drag: boolean) =>
-          write(`type:move\ndx:${dx}\ndy:${dy}\ndown:${drag ? 1 : 0}\n\n`),
-        scroll: (dx: number, dy: number) => write(`type:scroll\ndx:${dx}\ndy:${dy}\n\n`)
-      } satisfies PointerInput
-    })
-
-    return { url, host, clientKey, request, requestAs, subscribe, pointer, closed }
   })
 
 /**

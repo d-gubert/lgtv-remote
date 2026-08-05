@@ -1,7 +1,7 @@
 import { Args, Command, Options } from "@effect/cli"
 import { Effect, Option } from "effect"
 import { BadInput } from "../domain/errors.js"
-import { ExternalInputList, ForegroundApp, LaunchPoints, Uri } from "../domain/ssap.js"
+import { ExternalInputList, ForegroundApp, LaunchPoints, Uri } from "../sdk/index.js"
 import { withTv } from "../services/Tv.js"
 import { cyan, dim, emit, ok, table } from "../ui.js"
 

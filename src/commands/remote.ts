@@ -2,7 +2,7 @@ import { Args, Command, Options } from "@effect/cli"
 import { Duration, Effect } from "effect"
 import { buttonGroups, resolveButton } from "../domain/buttons.js"
 import { BadInput } from "../domain/errors.js"
-import { Uri } from "../domain/ssap.js"
+import { Uri } from "../sdk/index.js"
 import { withTv } from "../services/Tv.js"
 import { bold, cyan, dim, emit, ok } from "../ui.js"
 

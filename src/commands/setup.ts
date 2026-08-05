@@ -1,5 +1,5 @@
 import { Args, Command, Options } from "@effect/cli"
-import { Console, Duration, Effect, Either, Option } from "effect"
+import { Console, Duration, Effect, Either } from "effect"
 import { BadInput, explain } from "../domain/errors.js"
 import {
   ConnectionInfo,
@@ -7,7 +7,7 @@ import {
   macForActiveInterface,
   SoftwareInfo,
   Uri
-} from "../domain/ssap.js"
+} from "../sdk/index.js"
 import { discover } from "../services/Discovery.js"
 import { Session } from "../services/Session.js"
 import { Settings } from "../services/Settings.js"
@@ -59,7 +59,7 @@ export const pairCommand = Command.make("pair", {}, () =>
         })
       )
       const mac = Either.match(network, {
-        onLeft: () => Option.none<string>(),
+        onLeft: () => undefined,
         onRight: ({ info, status }) => macForActiveInterface(info, status)
       })
 
@@ -80,12 +80,12 @@ export const pairCommand = Command.make("pair", {}, () =>
 
       const software = yield* tv
         .requestAs(Uri.softwareInfo, SoftwareInfo)
-        .pipe(Effect.orElseSucceed(() => ({}) as typeof SoftwareInfo.Type))
+        .pipe(Effect.orElseSucceed(() => ({}) as SoftwareInfo))
 
       yield* settings.rememberDevice(tv.host, {
         clientKey: tv.clientKey,
         ssl,
-        ...(Option.isSome(mac) ? { mac: mac.value } : {}),
+        ...(mac === undefined ? {} : { mac }),
         ...(software.model_name === undefined ? {} : { name: software.model_name })
       })
 
@@ -94,7 +94,7 @@ export const pairCommand = Command.make("pair", {}, () =>
           `${bold("Paired with")} ${cyan(tv.host)}`,
           keyValue([
             ["model", software.model_name ?? "unknown"],
-            ["mac", Option.getOrElse(mac, () => "unknown (set it with `lgtv config set-mac`)")],
+            ["mac", mac ?? "unknown (set it with `lgtv config set-mac`)"],
             ["ssl", ssl ? "on — used by default from now on" : "off"],
             ["key saved to", settings.file]
           ]),
@@ -103,7 +103,7 @@ export const pairCommand = Command.make("pair", {}, () =>
         {
           host: tv.host,
           model: software.model_name,
-          mac: Option.getOrUndefined(mac),
+          mac,
           ssl,
           warnings,
           settingsFile: settings.file

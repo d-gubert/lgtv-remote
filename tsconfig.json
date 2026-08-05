@@ -10,7 +10,7 @@
     "rootDir": "src",
     "outDir": "dist",
     "sourceMap": true,
-    "declaration": false,
+    "declaration": true,
 
     "strict": true,
     "exactOptionalPropertyTypes": true,

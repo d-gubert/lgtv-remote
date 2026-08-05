@@ -1,8 +1,8 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
-import { Either, Option } from "effect"
+import { Either } from "effect"
 import { allButtons, resolveButton } from "../src/domain/buttons.js"
-import { macForActiveInterface } from "../src/domain/ssap.js"
+import { macForActiveInterface } from "../src/sdk/index.js"
 import { tokenize } from "../src/domain/tokenize.js"
 import {
   contentTarget,
@@ -38,23 +38,23 @@ describe("macForActiveInterface", () => {
         wired: { state: "disconnected" },
         wifi: { state: "connected" }
       }),
-      Option.some(WIFI)
+      WIFI
     )
     assert.deepEqual(
       macForActiveInterface(bothMacs, {
         wired: { state: "connected" },
         wifi: { state: "disconnected" }
       }),
-      Option.some(WIRED)
+      WIRED
     )
   })
 
   it("falls back to any MAC when no interface claims to be connected", () => {
-    assert.deepEqual(macForActiveInterface(bothMacs, {}), Option.some(WIRED))
-    assert.deepEqual(macForActiveInterface(bothMacs), Option.some(WIRED))
+    assert.deepEqual(macForActiveInterface(bothMacs, {}), WIRED)
+    assert.deepEqual(macForActiveInterface(bothMacs), WIRED)
     assert.deepEqual(
       macForActiveInterface({ wifiInfo: { macAddress: WIFI } }, { wifi: { state: "unknown" } }),
-      Option.some(WIFI)
+      WIFI
     )
   })
 
@@ -64,12 +64,12 @@ describe("macForActiveInterface", () => {
         { wiredInfo: {}, wifiInfo: { macAddress: WIFI } },
         { wired: { state: "connected" }, wifi: { state: "connected" } }
       ),
-      Option.some(WIFI)
+      WIFI
     )
   })
 
-  it("is none when the TV lists no MACs at all", () => {
-    assert.deepEqual(macForActiveInterface({}, { wifi: { state: "connected" } }), Option.none())
+  it("is undefined when the TV lists no MACs at all", () => {
+    assert.equal(macForActiveInterface({}, { wifi: { state: "connected" } }), undefined)
   })
 })
 
