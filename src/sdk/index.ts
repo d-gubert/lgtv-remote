@@ -13,44 +13,44 @@
  */
 
 export {
-  connect,
-  type CallOptions,
-  type Connection,
-  type ConnectOptions,
-  type Payload,
-  type Pointer,
-  type Subscription,
-  type SubscriptionListener,
-  type Updates,
+	connect,
+	type CallOptions,
+	type Connection,
+	type ConnectOptions,
+	type Payload,
+	type Pointer,
+	type Subscription,
+	type SubscriptionListener,
+	type Updates,
 } from "./client.js";
 
 export {
-  isSsapError,
-  PairingFailed,
-  SsapError,
-  SsapFailed,
-  TvUnreachable,
-  UnexpectedResponse,
-  type AnySsapError,
-  type SsapErrorTag,
+	isSsapError,
+	PairingFailed,
+	SsapError,
+	SsapFailed,
+	TvUnreachable,
+	UnexpectedResponse,
+	type AnySsapError,
+	type SsapErrorTag,
 } from "./errors.js";
 
 export { pairingManifest } from "./pairing.js";
 export { Uri } from "./uri.js";
 
 export {
-  array,
-  boolean,
-  number,
-  optional,
-  payload,
-  record,
-  string,
-  struct,
-  unknown,
-  type DecodeResult,
-  type Decoder,
-  type Infer,
+	array,
+	boolean,
+	number,
+	optional,
+	payload,
+	record,
+	string,
+	struct,
+	unknown,
+	type DecodeResult,
+	type Decoder,
+	type Infer,
 } from "./decode.js";
 
 export * from "./responses.js";

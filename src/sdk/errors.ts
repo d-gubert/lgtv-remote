@@ -8,47 +8,47 @@
  */
 
 export type SsapErrorTag =
-  | "TvUnreachable"
-  | "PairingFailed"
-  | "SsapFailed"
-  | "UnexpectedResponse";
+	| "TvUnreachable"
+	| "PairingFailed"
+	| "SsapFailed"
+	| "UnexpectedResponse";
 
 /** The base every failure below extends, so `instanceof` catches all of them. */
 export abstract class SsapError extends Error {
-  abstract readonly _tag: SsapErrorTag;
+	abstract readonly _tag: SsapErrorTag;
 }
 
 const describe = (cause: unknown): string =>
-  cause instanceof Error ? cause.message : String(cause);
+	cause instanceof Error ? cause.message : String(cause);
 
 /** The socket never opened, failed, or closed under us. */
 export class TvUnreachable extends SsapError {
-  readonly _tag = "TvUnreachable";
+	readonly _tag = "TvUnreachable";
 
-  /** Whatever `ws` reported, or a description of how the socket ended. */
-  override readonly cause: unknown;
+	/** Whatever `ws` reported, or a description of how the socket ended. */
+	override readonly cause: unknown;
 
-  constructor(
-    readonly url: string,
-    cause: unknown,
-  ) {
-    super(`could not reach ${url}: ${describe(cause)}`);
-    this.name = "TvUnreachable";
-    this.cause = cause;
-  }
+	constructor(
+		readonly url: string,
+		cause: unknown,
+	) {
+		super(`could not reach ${url}: ${describe(cause)}`);
+		this.name = "TvUnreachable";
+		this.cause = cause;
+	}
 }
 
 /** The handshake ended without a client key: refused, dropped, or timed out. */
 export class PairingFailed extends SsapError {
-  readonly _tag = "PairingFailed";
+	readonly _tag = "PairingFailed";
 
-  constructor(
-    readonly url: string,
-    readonly detail: string,
-  ) {
-    super(`pairing with ${url} failed: ${detail}`);
-    this.name = "PairingFailed";
-  }
+	constructor(
+		readonly url: string,
+		readonly detail: string,
+	) {
+		super(`pairing with ${url} failed: ${detail}`);
+		this.name = "PairingFailed";
+	}
 }
 
 /**
@@ -57,28 +57,28 @@ export class PairingFailed extends SsapError {
  * fails this way too, since the TV accepted it and simply said nothing.
  */
 export class SsapFailed extends SsapError {
-  readonly _tag = "SsapFailed";
+	readonly _tag = "SsapFailed";
 
-  constructor(
-    readonly uri: string,
-    readonly detail: string,
-  ) {
-    super(`the TV refused ${uri}: ${detail}`);
-    this.name = "SsapFailed";
-  }
+	constructor(
+		readonly uri: string,
+		readonly detail: string,
+	) {
+		super(`the TV refused ${uri}: ${detail}`);
+		this.name = "SsapFailed";
+	}
 }
 
 /** The TV answered, but not in the shape the caller asked to decode. */
 export class UnexpectedResponse extends SsapError {
-  readonly _tag = "UnexpectedResponse";
+	readonly _tag = "UnexpectedResponse";
 
-  constructor(
-    readonly uri: string,
-    readonly detail: string,
-  ) {
-    super(`the reply to ${uri} was not in the expected shape: ${detail}`);
-    this.name = "UnexpectedResponse";
-  }
+	constructor(
+		readonly uri: string,
+		readonly detail: string,
+	) {
+		super(`the reply to ${uri} was not in the expected shape: ${detail}`);
+		this.name = "UnexpectedResponse";
+	}
 }
 
 /**
@@ -87,10 +87,10 @@ export class UnexpectedResponse extends SsapError {
  * handle.
  */
 export type AnySsapError =
-  | TvUnreachable
-  | PairingFailed
-  | SsapFailed
-  | UnexpectedResponse;
+	| TvUnreachable
+	| PairingFailed
+	| SsapFailed
+	| UnexpectedResponse;
 
 export const isSsapError = (error: unknown): error is AnySsapError =>
-  error instanceof SsapError;
+	error instanceof SsapError;
